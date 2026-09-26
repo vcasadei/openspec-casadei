@@ -78,7 +78,7 @@ remaining=$(git diff --name-only --diff-filter=U)
 if [ -n "$remaining" ]; then
   echo
   echo "Conflicts needing your attention:"
-  echo "$remaining" | sed 's/^/  /'
+  while IFS= read -r line; do echo "  $line"; done <<< "$remaining"
   echo
   echo "Resolve them, then: git add <files> && git commit"
   exit 1
