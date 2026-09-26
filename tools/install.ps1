@@ -6,9 +6,14 @@
     -Project also selects the schema in that project's openspec/config.yaml.
     -User also installs the authorship rule into ~/.claude/CLAUDE.md, so it
     applies to every session rather than only to an /opsx:apply run.
+    -Project -Claude also writes the authorship rule into <project>\CLAUDE.md,
+    so it is committed with the repo.
 
 .EXAMPLE
     .\tools\install.ps1 -Project C:\path\to\repo   # project-local (priority 1)
+
+.EXAMPLE
+    .\tools\install.ps1 -Project C:\path\to\repo -Claude   # + <project>\CLAUDE.md
 
 .EXAMPLE
     .\tools\install.ps1 -User                      # per-machine    (priority 2)
@@ -28,7 +33,10 @@ param(
     [switch]$NoClaudeMd,
 
     [Parameter(Mandatory, ParameterSetName = 'Project')]
-    [string]$Project
+    [string]$Project,
+
+    [Parameter(ParameterSetName = 'Project')]
+    [switch]$Claude
 )
 
 $ErrorActionPreference = 'Stop'
@@ -106,15 +114,16 @@ function Set-ProjectSchema([string]$Root) {
     Write-Host "   Set 'schema: $SchemaName' in openspec/config.yaml (was 'spec-driven')."
 }
 
-# Install the authorship rule globally.
+# Install the authorship rule into a CLAUDE.md.
 #
-# It lives here rather than in the schema's apply instruction because the apply
-# instruction is only in context during an /opsx:apply run - a plain
+# It lives here rather than only in the schema's apply instruction because the
+# apply instruction is only in context during an /opsx:apply run - a plain
 # "commit this" would never see it. Written inside a delimited block so the
 # file can be re-written idempotently without touching anything else in it.
-function Install-ClaudeMd {
-    $dir  = Join-Path $env:USERPROFILE '.claude'
-    $file = Join-Path $dir 'CLAUDE.md'
+#
+#   $File - ~/.claude/CLAUDE.md (-User) or <project>\CLAUDE.md (-Project -Claude)
+function Install-ClaudeMd([string]$File) {
+    $dir = Split-Path -Parent $File
 
     # Single source shared with install.sh, so the two installers cannot drift.
     if (-not (Test-Path $RuleFile)) {
@@ -197,13 +206,16 @@ Write-Host "Installed schema '$SchemaName' -> $dest"
 
 if ($PSCmdlet.ParameterSetName -eq 'Project') {
     Set-ProjectSchema $projectRoot
+    if ($Claude) {
+        Install-ClaudeMd (Join-Path $projectRoot 'CLAUDE.md')
+    }
     Write-Host ""
     Write-Host "Verify with: openspec schema which $SchemaName"
 } else {
     if ($NoClaudeMd) {
         Write-Host "   Skipped ~/.claude/CLAUDE.md (-NoClaudeMd)."
     } else {
-        Install-ClaudeMd
+        Install-ClaudeMd (Join-Path (Join-Path $env:USERPROFILE '.claude') 'CLAUDE.md')
     }
     Write-Host ""
     Write-Host "!  A user-level schema is installed but not selected anywhere."

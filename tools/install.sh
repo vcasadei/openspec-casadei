@@ -10,6 +10,8 @@
 #
 # Options:
 #   --no-claude-md   (with --user) skip writing ~/.claude/CLAUDE.md
+#   --claude         (with --project) also write the authorship rule into
+#                    <project>/CLAUDE.md, so it is committed with the repo
 #
 # See README.md for the resolution order.
 set -euo pipefail
@@ -22,7 +24,7 @@ BLOCK_END="<!-- END openspec-casadei: authorship -->"
 RULE_FILE="$REPO_ROOT/tools/authorship.md"
 
 usage() {
-  sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit "${1:-1}"
 }
 
@@ -80,15 +82,19 @@ set_project_schema() {
   echo "   Set 'schema: $SCHEMA_NAME' in openspec/config.yaml (was 'spec-driven')."
 }
 
-# Install the authorship rule globally.
+# Install the authorship rule into a CLAUDE.md.
 #
-# It lives here rather than in the schema's apply instruction because the apply
-# instruction is only in context during an /opsx:apply run - a plain
+# It lives here rather than only in the schema's apply instruction because the
+# apply instruction is only in context during an /opsx:apply run - a plain
 # "commit this" would never see it. Written inside a delimited block so the
 # file can be re-written idempotently without touching anything else in it.
+#
+#   $1 - target file: ~/.claude/CLAUDE.md (--user) or <project>/CLAUDE.md
+#        (--project --claude)
 install_claude_md() {
-  local dir="$HOME/.claude"
-  local file="$dir/CLAUDE.md"
+  local file="$1"
+  local dir
+  dir="$(dirname "$file")"
   local body
   # Single source shared with install.ps1, so the two installers cannot drift.
   if [ ! -f "$RULE_FILE" ]; then
@@ -127,18 +133,24 @@ install_claude_md() {
 mode=""
 project_path=""
 write_claude_md=1
+project_claude_md=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --user)          mode="user"; shift ;;
     --project)       mode="project"; project_path="${2:-.}"; shift 2 ;;
     --no-claude-md)  write_claude_md=0; shift ;;
+    --claude)        project_claude_md=1; shift ;;
     -h|--help)       usage 0 ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
   esac
 done
 
 [ -n "$mode" ] || { echo "Error: pass --user or --project <path>" >&2; usage; }
+if [ "$project_claude_md" -eq 1 ] && [ "$mode" != "project" ]; then
+  echo "Error: --claude only applies to --project (--user already writes ~/.claude/CLAUDE.md)" >&2
+  exit 1
+fi
 [ -d "$SOURCE_DIR" ] || { echo "Error: schema not found at $SOURCE_DIR" >&2; exit 1; }
 
 if [ "$mode" = "user" ]; then
@@ -169,11 +181,14 @@ echo "Installed schema '$SCHEMA_NAME' -> $dest"
 
 if [ "$mode" = "project" ]; then
   set_project_schema "$project_root"
+  if [ "$project_claude_md" -eq 1 ]; then
+    install_claude_md "$project_root/CLAUDE.md"
+  fi
   echo
   echo "Verify with: openspec schema which $SCHEMA_NAME"
 else
   if [ "$write_claude_md" -eq 1 ]; then
-    install_claude_md
+    install_claude_md "$HOME/.claude/CLAUDE.md"
   else
     echo "   Skipped ~/.claude/CLAUDE.md (--no-claude-md)."
   fi

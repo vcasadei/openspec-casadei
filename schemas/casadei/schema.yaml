@@ -394,10 +394,12 @@ apply:
     file.
 
     This rule is deliberately duplicated in `~/.claude/CLAUDE.md` (written by
-    `tools/install.sh --user`). This copy covers an `/opsx:apply` run in any
-    project that carries the schema, including a teammate's checkout; the
-    CLAUDE.md copy covers every other session, where this instruction is not in
-    context at all. Keep the two in sync when editing either.
+    `tools/install.sh --user`) and/or `<project>/CLAUDE.md` (written by
+    `tools/install.sh --project <path> --claude`). This copy covers an
+    `/opsx:apply` run in any project that carries the schema, including a
+    teammate's checkout; the CLAUDE.md copies cover every other session, where
+    this instruction is not in context at all. They are generated from
+    `tools/authorship.md` - keep that file and this block in sync.
 
     ## Issue tracking & branching
 
