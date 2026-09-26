@@ -538,11 +538,26 @@ directories and never touch your real `~/.claude/CLAUDE.md`:
 .\tools\tests\install.tests.ps1 -Shell powershell             # ...and Windows PowerShell 5.1
 ```
 
-[`.github/workflows/installers.yml`](.github/workflows/installers.yml) runs them
-on every pull request and every push to `main`: ShellCheck, `install.sh` on
-Linux and macOS, `install.ps1` on Windows under both shells, and
-`openspec schema validate casadei` against the latest CLI from npm in a freshly
-`openspec init`-ed project.
+The sync scripts have them too, built on throwaway local repos:
+
+```bash
+./tools/tests/sync-upstream.test.sh                           # sync-upstream.sh
+```
+
+```powershell
+.\tools\tests\sync-upstream.tests.ps1 -Shell pwsh            # sync-upstream.ps1
+```
+
+[`.github/workflows/installers.yml`](.github/workflows/installers.yml) runs on
+every pull request, every push to `main`, and weekly:
+
+| Job | Checks |
+|---|---|
+| ShellCheck | Every `.sh` in `tools/` |
+| bash scripts | `install.sh` and `sync-upstream.sh` tests, Linux and macOS |
+| PowerShell scripts | `install.ps1` and `sync-upstream.ps1` tests, Windows, PowerShell 7 and 5.1 |
+| Schema validates (npm CLI) | `openspec schema validate casadei` with the latest release from npm, in a fresh `openspec init` project |
+| Schema validates (upstream CLI) | The same, with the CLI built from the newest upstream commit merged into this fork |
 
 ### Per-project tweaks that don't need a schema change
 
@@ -573,17 +588,76 @@ Schema = how I always work. `config.yaml` = what's true of one repo.
 
 # Pulling in upstream changes
 
-This fork keeps full upstream history and an `upstream` remote:
+This fork keeps full upstream history, so upstream merges in like any branch.
+It happens **automatically every Monday**, and you can also run it by hand.
+
+## Automatically
+
+[`.github/workflows/upstream-sync.yml`](.github/workflows/upstream-sync.yml)
+runs weekly (Mondays 06:17 UTC) and on demand from the Actions tab:
+
+1. Runs `tools/sync-upstream.sh` on a `chore/sync-upstream-<sha>` branch
+2. Runs the test suites, then opens a PR
+3. Waits for [CI](#tests-and-ci), which also validates the schema against the
+   CLI **built from the exact upstream commit being merged**
+4. Merges the PR (always a merge commit: squashing would drop upstream's history
+   and break the next sync) and deletes the branch
+
+| What happens | Result |
+|---|---|
+| Already up to date | Nothing |
+| A sync PR for the same upstream commit is already open | Left alone |
+| An older sync PR is open | Closed as superseded, then a new one opens |
+| Conflict in a tracked path | No PR. The run fails and, if issues are enabled, opens or updates an issue with the conflicting files |
+| CI fails | PR left open with a comment. The run fails |
+| Upstream changed `schemas/spec-driven/` | Merged normally; the PR calls it out, because porting into `schemas/casadei/` is still manual |
+
+A failed run is the alert: GitHub emails you when a scheduled workflow fails.
+Merge commits are authored as the author of `main`'s tip, never as a bot.
+
+To test it without pushing anything, run it from the Actions tab with
+**dry run** checked. It merges and runs the tests on the runner, then stops.
+
+### One-time setup: the `SYNC_TOKEN` secret
+
+The workflow needs a token of yours, because `GITHUB_TOKEN` can't do the job:
+PRs opened with it don't trigger CI, and it can't push commits that touch
+`.github/workflows/` (upstream's history does).
+
+1. Create a **fine-grained personal access token** at
+   <https://github.com/settings/personal-access-tokens/new>
+   - Repository access: **Only select repositories** → `openspec-casadei`
+   - Repository permissions, all **Read and write**: **Contents**,
+     **Pull requests**, **Issues**, **Workflows**
+2. Save it as a repository secret named `SYNC_TOKEN`:
+
+   ```bash
+   gh secret set SYNC_TOKEN --repo vcasadei/openspec-casadei
+   ```
+
+When the token expires, the next run fails at "Check for SYNC_TOKEN" or at
+checkout; create a new one and set the secret again.
+
+## By hand
 
 ```bash
 ./tools/sync-upstream.sh          # or: tools\sync-upstream.ps1
 ```
 
-It fetches and merges `upstream/main`, auto-resolving the modify/delete
-conflicts for the thousand-odd CLI files this fork doesn't carry. What it leaves
-behind is the part that needs judgment: changes to `schemas/spec-driven/`.
+It fetches and merges `upstream/main`, treating each path by what it is:
 
-Then see what upstream improved and whether it's worth porting:
+| Path | On merge |
+|---|---|
+| **Tracked** — `schemas/`, `skills/`, `docs/`, `LICENSE`, `.gitattributes`, `.gitignore` | Merged normally. A conflict here is real, and the script stops for you to resolve it |
+| **Fork-owned** — `README.md`, `NOTICE.md`, `tools/`, our workflows | Kept exactly as they were, even when upstream edits a file of the same name (upstream has its own `README.md`) |
+| **Upstream-only** — the CLI source, tests, website, everything else | Kept out, whether upstream modifies or re-adds them |
+
+Put differently: outside the tracked paths, a sync never changes the fork's
+tree. To start following a new upstream path, add it to `TRACKED_PREFIXES` in
+both `sync-upstream.sh` and `sync-upstream.ps1`.
+
+What it leaves for you is the part that needs judgment: changes to
+`schemas/spec-driven/`. See what upstream improved and whether it's worth porting:
 
 ```bash
 diff -ru schemas/spec-driven/ schemas/casadei/
