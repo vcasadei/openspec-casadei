@@ -37,7 +37,8 @@ Added here (paths upstream does not use, so they never cause merge conflicts):
 |---|---|
 | `schemas/casadei/` | **The customized schema** — this is the one that gets edited |
 | `tools/` | Install and upstream-sync helpers, and their tests |
-| `.github/workflows/installers.yml` | CI for the installers and schema (upstream's own workflows stay removed) |
+| `.github/workflows/installers.yml` | CI for the scripts and schema (upstream's own workflows stay removed) |
+| `.github/workflows/upstream-sync.yml` | Weekly automatic merge of upstream, via PR and CI |
 | `NOTICE.md`, `README.md` | This fork's own documentation |
 
 Removed from upstream (1171 files → 49): the CLI source (`src/`, `test/`, `bin/`,
