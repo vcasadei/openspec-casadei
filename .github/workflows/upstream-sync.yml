@@ -39,6 +39,10 @@ env:
   CONFLICT_ISSUE_TITLE: Upstream sync needs manual conflict resolution
   DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
   GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+  # Pin gh to this repo. Without it, gh resolves the base repo from the git
+  # remotes and prefers one named 'upstream' - so it would open PRs, list PRs
+  # and file issues against Fission-AI/OpenSpec instead of this fork.
+  GH_REPO: ${{ github.repository }}
 
 jobs:
   sync:
@@ -183,7 +187,9 @@ jobs:
           BASE: ${{ steps.check.outputs.base }}
           COUNT: ${{ steps.check.outputs.count }}
         run: |
-          git push --quiet origin "$BRANCH"
+          # --force: the branch belongs to this workflow, and a retry after a
+          # failed run rebuilds the merge commit, which a plain push rejects.
+          git push --quiet --force origin "$BRANCH"
           tracked="$(git diff --stat=100 HEAD~1 HEAD | tail -n 50)"
           {
             echo "Merges **$COUNT** upstream commit(s), up to [\`$SHA\`](https://github.com/$UPSTREAM_REPO/commit/$SHA)."
