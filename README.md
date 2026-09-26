@@ -327,7 +327,7 @@ Step 3, and check the destination table above.
 # What's different from stock OpenSpec
 
 Measured against `schemas/spec-driven/`, which this repo keeps pristine on
-purpose: **+332 lines, −16, across 5 files.** Almost entirely additive.
+purpose: **+406 lines, −17, across 5 files.** Almost entirely additive.
 
 Reproduce it yourself at any time:
 
@@ -345,14 +345,14 @@ git diff --no-index schemas/spec-driven schemas/casadei
 | Dependencies | No position | Must be named in Impact and user-approved |
 | `design.md` template | Context, Goals, Decisions, Risks | Adds **Migration Plan**, **Security & Observability**, **Open Questions** |
 | DB migrations | No position | Expand-and-contract, plus a tested `down` migration |
-| Tests | Not mentioned in tasks | Mandatory task, mapped to scenarios, coverage threshold |
+| Tests | Each task group lands its own tests and docs | Also: a mandatory test per feature or fix, mapped to its BDD scenario; coverage threshold checked in Quality Gates |
 | `/docs/` | No position | Updated in the same commit, PT-BR, table-dense |
 | Git/commits | No position | Conventional Commits, branch naming, no direct-to-`main` |
 | Authorship | No position | Human author only; no AI co-author trailers |
 | Docblocks | No position | Required on every exported symbol, with `@param`/`@returns`/`@throws` |
 | Quality gates | No position | Build, lint, static analysis, strict types before review |
 
-## The three things actually *changed* (not added)
+## The four things actually *changed* (not added)
 
 Everything else is appended. These are the only upstream lines rewritten:
 
@@ -362,6 +362,11 @@ Everything else is appended. These are the only upstream lines rewritten:
    the actor line.
 3. **The worked example** in the `specs` instruction, rewritten to use the new
    format and to show a second, non-happy-path scenario.
+4. **The tasks example and template.** Upstream's example ends with a single
+   docs task; mine replaces it with a scenario-mapped test and a `/docs/` task,
+   and closes with a Quality Gates group. The template keeps upstream's
+   "tests and docs inside each group" shape, with slots for both in every
+   group, a Migration group, and Quality Gates.
 
 ## What each artifact gained
 
@@ -386,10 +391,12 @@ rationale; expand-and-contract migrations with a functional `down` for every
 step; feature flags with a stated removal criterion; where secrets load from and
 how PII is redacted.
 
-**`tasks`** — at least one automated test per feature or fix, mapped onto the
-spec's scenarios; coverage threshold maintained or raised; per-step migration
-tasks plus rollback verification; `/docs/` updated in the same commit; a closing
-quality-gate group naming the project's real commands.
+**`tasks`** — test and `/docs/` tasks live inside the group whose work they
+cover, so each group is built, tested and documented before the next builds on
+it (upstream's rule, made concrete); at least one automated test per feature or
+fix, mapped onto the spec's scenarios; per-step migration tasks plus rollback
+verification; `/docs/` updated in the same commit; a closing quality-gate group
+naming the project's real commands, including the coverage threshold.
 
 **`apply`** — human authorship with no AI trailers; never commit to `main`
 unasked; JIRA or GitHub Issues/Projects (ask if it's not already obvious) —
@@ -502,7 +509,7 @@ schemas/casadei/
     ├── proposal.md      # Why / What Changes / Capabilities / Impact
     ├── spec.md          # Purpose / ADDED Requirements / BDD scenarios
     ├── design.md        # Context / Goals / Decisions / Security / Migration / Risks
-    └── tasks.md         # numbered groups incl. Tests, Migration, Docs, Quality Gates
+    └── tasks.md         # groups with their own tests + docs, Migration, Quality Gates
 ```
 
 Two knobs, and the difference matters:

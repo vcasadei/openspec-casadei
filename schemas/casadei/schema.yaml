@@ -140,7 +140,7 @@ artifacts:
       path is under-specified - cover at least the failure mode a caller can
       actually hit.
 
-      New capabilities only: start the delta spec with a `## Purpose` section -
+      New capabilities only: the delta spec's first section is `## Purpose` -
       one or two sentences (50+ characters, or `openspec validate --strict`
       reports it as too brief) describing what the capability is for. Archive
       copies it into the main spec it creates; without it the new main spec is
@@ -165,8 +165,10 @@ artifacts:
       Common pitfall: Using MODIFIED with partial content loses detail at archive time.
       If adding new concerns without changing existing behavior, use ADDED instead.
 
-      Example (a new capability, so it opens with `## Purpose`):
+      Example (a new capability, so its first section is `## Purpose`):
       ```
+      # Spec Delta
+
       ## Purpose
 
       Lets users take their data out of the product in a portable format.
@@ -314,7 +316,10 @@ artifacts:
       bake an unstated assumption into the task list.
 
       **IMPORTANT: Follow the template below exactly.** The apply phase parses
-      checkbox format to track progress. Tasks not using `- [ ]` won't be tracked.
+      checkbox format to track progress. A box holding only `x` counts as done,
+      upper or lower case and with any spacing, so `- [ x]` is done too. Every
+      other marker, including `- [~]`, `- [-]` and an empty `- []`, reads as
+      unfinished. A line with no checkbox is not tracked at all.
 
       Guidelines:
       - Group related tasks under ## numbered headings
@@ -326,9 +331,18 @@ artifacts:
         that task's checkbox description. Use a separate verification task only
         when it checks broader integration or system behavior that spans
         multiple implementation tasks.
+      - Each task group MUST land the tests and documentation its own work
+        calls for. Do NOT collect testing or documentation into a final group -
+        when a late group first exercises work from an early one, the failures
+        cascade back through every group in between and force rework. A group
+        whose work calls for neither, such as scaffolding or dependency setup,
+        carries neither. A final group is for integration checks only, not for
+        the tests and docs an earlier group owed.
 
       Example:
       ```
+      # Tasks
+
       ## 1. Setup
 
       - [ ] 1.1 Create new module structure and verify expected files are present
@@ -338,6 +352,14 @@ artifacts:
 
       - [ ] 2.1 Implement data export function and verify the export test passes
       - [ ] 2.2 Add CSV formatting utilities and verify unit tests cover quoting and delimiters
+      - [ ] 2.3 Test scenario "Export requested while one is already running": a second request returns the in-flight export
+      - [ ] 2.4 Document the export API in /docs/export.md and verify the documented command runs as written
+
+      ## 3. Quality Gates
+
+      - [ ] 3.1 Build compiles cleanly: `npm run build`
+      - [ ] 3.2 Linter, static analysis and strict type checking pass: `npm run lint && npm run typecheck`
+      - [ ] 3.3 Coverage threshold still passes: `npm run test:coverage`
       ```
 
       ## Engineering standards
@@ -345,33 +367,42 @@ artifacts:
       Some work is not optional, and the task list is where it becomes visible.
       Include these as real, checkable tasks whenever the change touches the
       relevant surface - never as a trailing "also write tests" afterthought.
+      Test and documentation tasks live inside the group whose work they cover,
+      so each group is built, tested, and documented before the next one
+      builds on it. There is no separate Tests or Documentation group.
 
       **Testing is not a follow-up.**
       - Every feature and every fix MUST have at least one task producing an
         automated test - unit, integration, or contract (e.g. Pact).
       - Each BDD scenario in the specs is a candidate test case. Tasks should
-        map onto scenarios so coverage of the contract is traceable.
+        map onto scenarios so coverage of the contract is traceable, and each
+        scenario's test belongs to the group that implements it.
       - New code MUST maintain or raise the repository's existing coverage
-        threshold. If the change could lower it, add an explicit task to
-        confirm the threshold still passes.
+        threshold. Coverage is a whole-branch check, so confirming the
+        threshold still passes is a Quality Gates task.
 
       **Database changes carry their own tasks.** A schema alteration needs a
       separate task per expand-and-contract step, plus a task that exercises
       the `down` migration and verifies the rollback actually restores the
-      prior shape. "Write migration" alone is not sufficient.
+      prior shape. "Write migration" alone is not sufficient. Migration keeps
+      its own group, because its steps are sequential work - with the
+      verification of each step inside that group.
 
       **Documentation ships with the code, not after it.** When the change
       alters behavior, configuration, or a public interface, include a task to
       update the Markdown under `/docs/` in the same commit or MR as the
-      implementation. Documentation is written in Portuguese (PT-BR) by
+      implementation, in the group that makes the change. Documentation is written in Portuguese (PT-BR) by
       default unless the user says otherwise, and favors tables, bulleted
       technical specs, and interface schemas over prose - overview sections
       capped at 2-3 short paragraphs.
 
       **Quality gates close the list.** The final task group MUST verify the
-      branch is review-ready: the project compiles cleanly, and static
-      analysis, strict type checking, and the linter all pass. Name the actual
-      commands the project uses rather than describing them generically.
+      branch is review-ready: the project compiles cleanly, static analysis,
+      strict type checking, and the linter all pass, and the coverage
+      threshold holds. Name the actual commands the project uses rather than
+      describing them generically. These are whole-branch integration checks,
+      the only kind a final group may hold - never tests or docs an earlier
+      group owed.
 
       Reference specs for what needs to be built, design for how to build it.
     requires:
