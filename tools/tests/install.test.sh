@@ -70,7 +70,7 @@ run_case() {
     passed=$((passed + 1))
   else
     echo "  FAIL $current"
-    echo "$out" | sed 's/^/       | /'
+    while IFS= read -r line; do echo "       | $line"; done <<< "$out"
     failed=$((failed + 1))
   fi
 }

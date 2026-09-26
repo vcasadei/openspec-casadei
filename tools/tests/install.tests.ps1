@@ -226,8 +226,10 @@ $realProfile = $env:USERPROFILE
 $realXdg     = $env:XDG_DATA_HOME
 
 Write-Host "tools/install.ps1 (via $Shell)"
+# Only functions defined in this file - Get-Command alone would also pick up
+# every Test-* function from installed modules (the Az modules on CI runners).
 $tests = Get-Command -CommandType Function -Name 'Test-*' |
-    Where-Object { $_.Name -ne 'Test-SameTree' } |
+    Where-Object { $_.ScriptBlock.File -eq $PSCommandPath -and $_.Name -ne 'Test-SameTree' } |
     Sort-Object Name
 
 foreach ($t in $tests) {
