@@ -85,7 +85,9 @@ function New-Repos {
     Invoke-Git $u add -A | Out-Null
     Invoke-Git $u commit -q -m 'upstream: initial' | Out-Null
 
-    git clone -q $u $script:Fork 2>$null | Out-Null
+    # autocrlf off at clone time: Windows runners default it to true, which
+    # would check files out as CRLF and make every one look modified.
+    git -c core.autocrlf=false clone -q $u $script:Fork 2>$null | Out-Null
     $f = $script:Fork
     Initialize-Repo $f
     Invoke-Git $f remote rename origin upstream | Out-Null
@@ -96,6 +98,9 @@ function New-Repos {
     Copy-Item $SyncScript "$f\tools\sync-upstream.ps1"
     Invoke-Git $f add -A | Out-Null
     Invoke-Git $f commit -q -m 'fork: prune' | Out-Null
+    if ((Test-Path "$f\src") -or (Invoke-Git $f status --porcelain)) {
+        throw 'fixture setup failed: the fork did not prune cleanly'
+    }
 }
 
 # Make a commit in upstream after running $Change there.
