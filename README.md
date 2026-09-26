@@ -83,7 +83,7 @@ Each mode does more than copy files:
 | Mode | Also does |
 |---|---|
 | `--user` | Writes the **authorship rule** into `~/.claude/CLAUDE.md`, so it applies to *every* session — not just an `/opsx:apply` run |
-| `--project` | **Selects the schema** in that project's `openspec/config.yaml`, so there's nothing left to edit by hand |
+| `--project` | **Selects the schema** in that project's `openspec/config.yaml`, so there's nothing left to edit by hand. Add `--claude` to also write the **authorship rule** into `<project>/CLAUDE.md` |
 
 ### Option A — machine-wide (recommended for my own projects)
 
@@ -142,6 +142,26 @@ Copies the schema into the project and commits it alongside the code.
 # macOS / Linux
 ./tools/install.sh --project /path/to/your-project
 ```
+
+To also commit the authorship rule with the repo, add `--claude` (or `-Claude`):
+
+```powershell
+# Windows
+.\tools\install.ps1 -Project C:\path\to\your-project -Claude
+```
+
+```bash
+# macOS / Linux
+./tools/install.sh --project /path/to/your-project --claude
+```
+
+That writes the same delimited block as `--user` into `<project>/CLAUDE.md`
+instead of `~/.claude/CLAUDE.md`. It's created if missing, appended if the file
+has no block yet, and only the block is rewritten on re-runs. Because
+Claude Code loads the project `CLAUDE.md` in every session, the rule then
+applies to every session in that repo for **everyone** who clones it, not just to
+`/opsx:apply` runs and not just on my machine. `--claude` is rejected with
+`--user`, which already writes `~/.claude/CLAUDE.md`.
 
 Lands in `<project>/openspec/schemas/casadei/`, **and selects it** in the
 project's `openspec/config.yaml`. What it reports depends on what it finds:
@@ -431,7 +451,7 @@ change.
 
 | Standard | Lives in |
 |---|---|
-| **§1 Identity & git governance** | `apply.instruction` — **plus** the authorship rule in `~/.claude/CLAUDE.md` (see below) |
+| **§1 Identity & git governance** | `apply.instruction` — **plus** the authorship rule in `~/.claude/CLAUDE.md` and/or `<project>/CLAUDE.md` (see below) |
 | **§2 Anti-bloat & code standards** | `apply.instruction`, with design-time judgment in `design.instruction` and dependency approval in `proposal.instruction` |
 | **§3 Resilience & migrations** | `specs.instruction` (contract) and `design.instruction` (mechanism), tasks in `tasks.instruction` |
 | **§4 Documentation (`/docs/`, PT-BR)** | `tasks.instruction` and `apply.instruction` |
@@ -442,15 +462,17 @@ change.
 ## The one deliberate duplication
 
 The **authorship rule** is the single exception: it lives in
-`apply.instruction` *and* in `~/.claude/CLAUDE.md`. Neither location covers the
-whole surface on its own:
+`apply.instruction` *and* in a `CLAUDE.md` — `~/.claude/CLAUDE.md` via `--user`,
+`<project>/CLAUDE.md` via `--project --claude`, or both. No single location
+covers the whole surface on its own:
 
 | Location | Covers | Misses |
 |---|---|---|
 | `apply.instruction` | Any `/opsx:apply` run in a project carrying the schema — including a teammate's checkout | Everything else. A plain "commit this" never loads it |
 | `~/.claude/CLAUDE.md` | Every session on **my** machine, whatever the project or prompt | Anyone else's machine — it's personal config, not repo config |
+| `<project>/CLAUDE.md` | Every session in **that repo**, on any machine that clones it | Projects installed without `--claude` |
 
-Since this is the one rule I least want missed, it's in both.
+Since this is the one rule I least want missed, it's in more than one place.
 
 The CLAUDE.md copy is **not** embedded in the installers — both read
 [`tools/authorship.md`](tools/authorship.md), so the bash and PowerShell paths
@@ -460,7 +482,7 @@ places to keep in sync when the rule changes:
 | File | How it propagates |
 |---|---|
 | `schemas/casadei/schema.yaml` → `apply.instruction` | Re-run `install --project` / `--user` to push the schema out |
-| `tools/authorship.md` | Re-run `install --user` to rewrite the CLAUDE.md block |
+| `tools/authorship.md` | Re-run `install --user` and/or `install --project <path> --claude` to rewrite the CLAUDE.md block |
 
 The schema block carries an inline note saying so, so whoever edits one is told
 about the other.
