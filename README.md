@@ -1,5 +1,7 @@
 # OpenSpec, my way
 
+[![CI](https://github.com/vcasadei/openspec-casadei/actions/workflows/installers.yml/badge.svg?branch=main)](https://github.com/vcasadei/openspec-casadei/actions/workflows/installers.yml)
+
 My personal fork of [OpenSpec](https://github.com/Fission-AI/OpenSpec) v1.13.0,
 set up the way I like to work.
 
@@ -521,6 +523,26 @@ openspec schema validate casadei
 
 Then reinstall (Step 3) so projects pick up the change — the installer copies
 files, it doesn't symlink.
+
+### Tests and CI
+
+The installers have their own test suites, which run against throwaway
+directories and never touch your real `~/.claude/CLAUDE.md`:
+
+```bash
+./tools/tests/install.test.sh                                 # install.sh
+```
+
+```powershell
+.\tools\tests\install.tests.ps1 -Shell pwsh                   # install.ps1 under PowerShell 7
+.\tools\tests\install.tests.ps1 -Shell powershell             # ...and Windows PowerShell 5.1
+```
+
+[`.github/workflows/installers.yml`](.github/workflows/installers.yml) runs them
+on every pull request and every push to `main`: ShellCheck, `install.sh` on
+Linux and macOS, `install.ps1` on Windows under both shells, and
+`openspec schema validate casadei` against the latest CLI from npm in a freshly
+`openspec init`-ed project.
 
 ### Per-project tweaks that don't need a schema change
 

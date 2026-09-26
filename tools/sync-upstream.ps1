@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Stop'
 $UpstreamUrl = 'https://github.com/Fission-AI/OpenSpec.git'
 
 # Paths this fork tracks. An unmerged path under one of these is a real conflict.
-$KeepPrefixes = @('schemas/', 'skills/', 'docs/', 'LICENSE', '.gitattributes', '.gitignore')
+$KeepPrefixes = @('schemas/', 'skills/', 'docs/', 'LICENSE', '.gitattributes', '.gitignore', '.github/workflows/installers.yml')
 
 function Test-Kept([string]$Path) {
     foreach ($prefix in $KeepPrefixes) {

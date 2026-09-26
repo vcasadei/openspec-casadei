@@ -1,0 +1,76 @@
+# CI for this fork: the install scripts and the casadei schema.
+#
+# Named installers.yml rather than ci.yml because upstream ships its own
+# .github/workflows/ci.yml; a distinct name keeps tools/sync-upstream.sh from
+# ever seeing this file as an upstream conflict.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck tools/*.sh tools/tests/*.sh
+
+  install-sh:
+    name: install.sh (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./tools/tests/install.test.sh
+
+  install-ps1:
+    name: install.ps1 (${{ matrix.shell }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [pwsh, powershell]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./tools/tests/install.tests.ps1 -Shell ${{ matrix.shell }}
+
+  schema:
+    name: Schema validates with the OpenSpec CLI
+    runs-on: ubuntu-latest
+    env:
+      OPENSPEC_TELEMETRY: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Same command the README tells users to run, so CI catches a CLI
+      # release that breaks the schema before anyone installs it.
+      - run: npm install -g @fission-ai/openspec@latest
+      - run: openspec --version
+      - name: Install into a fresh project and validate
+        run: |
+          project="$(mktemp -d)"
+          (cd "$project" && openspec init --tools none < /dev/null)
+          ./tools/install.sh --project "$project" --claude
+          cd "$project"
+          grep -qx 'schema: casadei' openspec/config.yaml
+          openspec schema which casadei | tee which.txt
+          grep -q 'Source: project' which.txt
+          openspec schema validate casadei
