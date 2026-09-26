@@ -11,7 +11,7 @@ set -euo pipefail
 UPSTREAM_URL="https://github.com/Fission-AI/OpenSpec.git"
 
 # Paths this fork tracks. An unmerged path under one of these is a real conflict.
-KEEP_PREFIXES=("schemas/" "skills/" "docs/" "LICENSE" ".gitattributes" ".gitignore")
+KEEP_PREFIXES=("schemas/" "skills/" "docs/" "LICENSE" ".gitattributes" ".gitignore" ".github/workflows/installers.yml")
 
 cd "$(git rev-parse --show-toplevel)"
 
