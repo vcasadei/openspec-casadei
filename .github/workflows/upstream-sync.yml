@@ -1,0 +1,250 @@
+# Keep this fork merged with upstream OpenSpec.
+#
+# Weekly (or on demand), merge upstream/main with tools/sync-upstream.sh on a
+# chore/sync-upstream-<sha> branch, open a PR, wait for CI, and merge it if CI
+# passes. On a conflict in a tracked path it opens an issue instead; on a CI
+# failure it leaves the PR open. Either way the run fails, so GitHub notifies.
+#
+# Needs a SYNC_TOKEN secret: a fine-grained personal access token for this
+# repository with Contents, Pull requests, Issues and Workflows set to
+# read/write. GITHUB_TOKEN can't do this job, because:
+#   - pushes and PRs made with it don't trigger other workflows, so CI would
+#     never run on the sync PR;
+#   - it can't push commits that touch .github/workflows/, and upstream's
+#     history does.
+# See README.md, "Pulling in upstream changes".
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Merge and run the tests here, but don't push, open a PR, or merge
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/Fission-AI/OpenSpec.git
+  UPSTREAM_REPO: Fission-AI/OpenSpec
+  BRANCH_PREFIX: chore/sync-upstream-
+  CONFLICT_ISSUE_TITLE: Upstream sync needs manual conflict resolution
+  DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+  GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check for SYNC_TOKEN
+        if: env.DRY_RUN != 'true'
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::The SYNC_TOKEN secret is not set. See README.md, 'Pulling in upstream changes'."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+      # Merge commits are authored like the rest of this repo: by the human
+      # who owns it (the author of main's tip), never by a bot.
+      - name: Configure git
+        run: |
+          git config user.name "$(git log -1 --format=%an main)"
+          git config user.email "$(git log -1 --format=%ae main)"
+          echo "Committing as $(git config user.name) <$(git config user.email)>"
+
+      - name: Check upstream
+        id: check
+        run: |
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --quiet upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already up to date with upstream $(git rev-parse --short upstream/main)."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sha="$(git rev-parse --short=12 upstream/main)"
+          count="$(git rev-list --count HEAD..upstream/main)"
+          {
+            echo "needed=true"
+            echo "sha=$sha"
+            echo "branch=$BRANCH_PREFIX$sha"
+            echo "base=$(git merge-base HEAD upstream/main)"
+            echo "count=$count"
+          } >> "$GITHUB_OUTPUT"
+          echo "$count upstream commit(s) to merge, up to $sha."
+
+      # One sync PR at a time: skip if this exact upstream commit already has
+      # one, and close any older sync PR it supersedes.
+      - name: Check for open sync PRs
+        id: open
+        if: steps.check.outputs.needed == 'true' && env.DRY_RUN != 'true'
+        env:
+          BRANCH: ${{ steps.check.outputs.branch }}
+        run: |
+          skip=false
+          while IFS=$'\t' read -r number head; do
+            [ -n "$number" ] || continue
+            if [ "$head" = "$BRANCH" ]; then
+              echo "PR #$number already syncs this upstream commit; leaving it alone."
+              skip=true
+            else
+              echo "Closing PR #$number ($head), superseded by $BRANCH."
+              gh pr close "$number" --delete-branch --comment "Superseded by a newer upstream sync ($BRANCH)."
+            fi
+          done < <(gh pr list --state open --json number,headRefName \
+                     --jq ".[] | select(.headRefName | startswith(\"$BRANCH_PREFIX\")) | [.number, .headRefName] | @tsv")
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
+      - name: Merge upstream
+        id: merge
+        if: steps.check.outputs.needed == 'true' && steps.open.outputs.skip != 'true'
+        env:
+          BRANCH: ${{ steps.check.outputs.branch }}
+        run: |
+          git switch -c "$BRANCH"
+          set +e
+          ./tools/sync-upstream.sh 2>&1 | tee "$RUNNER_TEMP/sync.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -ne 0 ]; then
+            {
+              echo "conflicts<<EOF"
+              git diff --name-only --diff-filter=U
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report conflicts
+        if: steps.merge.outputs.code != '' && steps.merge.outputs.code != '0'
+        env:
+          SHA: ${{ steps.check.outputs.sha }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+        run: |
+          echo "::error::Upstream $SHA conflicts in tracked paths: ${CONFLICTS//$'\n'/, }"
+          if [ "$DRY_RUN" = "true" ]; then exit 1; fi
+          {
+            echo "The weekly sync with upstream \`$SHA\` stopped on conflicts in paths this fork tracks:"
+            echo
+            while IFS= read -r f; do printf -- '- \x60%s\x60\n' "$f"; done <<< "$CONFLICTS"
+            echo
+            echo "Resolve locally:"
+            echo
+            echo '```bash'
+            echo './tools/sync-upstream.sh   # stops at the same conflicts'
+            echo '# fix them, then:'
+            echo 'git add <files> && git commit'
+            echo '```'
+            echo
+            echo "Then open a PR as usual. Run log: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$RUNNER_TEMP/issue.md"
+          cat "$RUNNER_TEMP/issue.md" >> "$GITHUB_STEP_SUMMARY"
+          # Forks start with issues disabled; the failed run is the alert then.
+          if [ "$(gh repo view --json hasIssuesEnabled --jq .hasIssuesEnabled)" != "true" ]; then
+            echo "Issues are disabled on this repository; not opening one."
+            exit 1
+          fi
+          existing="$(gh issue list --state open --search "in:title \"$CONFLICT_ISSUE_TITLE\"" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "$RUNNER_TEMP/issue.md"
+          else
+            gh issue create --title "$CONFLICT_ISSUE_TITLE" --body-file "$RUNNER_TEMP/issue.md"
+          fi
+          exit 1
+
+      # Fast gate before anything is pushed - and the only tests a dry run gets.
+      - name: Run the test suites
+        if: steps.merge.outputs.code == '0'
+        run: |
+          ./tools/tests/install.test.sh
+          ./tools/tests/sync-upstream.test.sh
+
+      - name: Open the sync PR
+        id: pr
+        if: steps.merge.outputs.code == '0' && env.DRY_RUN != 'true'
+        env:
+          BRANCH: ${{ steps.check.outputs.branch }}
+          SHA: ${{ steps.check.outputs.sha }}
+          BASE: ${{ steps.check.outputs.base }}
+          COUNT: ${{ steps.check.outputs.count }}
+        run: |
+          git push --quiet origin "$BRANCH"
+          tracked="$(git diff --stat=100 HEAD~1 HEAD | tail -n 50)"
+          {
+            echo "Merges **$COUNT** upstream commit(s), up to [\`$SHA\`](https://github.com/$UPSTREAM_REPO/commit/$SHA)."
+            echo
+            echo "- Upstream changes: https://github.com/$UPSTREAM_REPO/compare/${BASE:0:12}...$SHA"
+            echo "- Made by \`tools/sync-upstream.sh\`: tracked paths merged, fork-owned files kept as they were, upstream-only files left out."
+            echo "- Merges automatically once CI passes."
+            echo
+            if git diff --quiet HEAD~1 HEAD -- schemas/spec-driven/; then
+              echo "The baseline schema (\`schemas/spec-driven/\`) is unchanged."
+            else
+              echo "> [!IMPORTANT]"
+              echo "> Upstream changed the baseline schema. \`schemas/casadei/\` is **not** updated automatically - review what's worth porting:"
+              echo "> \`diff -ru schemas/spec-driven/ schemas/casadei/\`"
+            fi
+            echo
+            echo "<details><summary>Files changed</summary>"
+            echo
+            echo '```'
+            echo "$tracked"
+            echo '```'
+            echo
+            echo "</details>"
+          } > "$RUNNER_TEMP/pr-body.md"
+          url="$(gh pr create --base main --head "$BRANCH" \
+                   --title "chore: sync upstream OpenSpec ($SHA)" \
+                   --body-file "$RUNNER_TEMP/pr-body.md")"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Opened $url"
+
+      - name: Wait for CI
+        id: ci
+        if: steps.pr.outputs.url != ''
+        env:
+          URL: ${{ steps.pr.outputs.url }}
+        run: |
+          # Checks take a moment to register on a new PR.
+          for _ in $(seq 1 30); do
+            n="$(gh pr checks "$URL" --json name --jq 'length' 2>/dev/null || echo 0)"
+            [ "$n" -gt 0 ] && break
+            sleep 10
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "::error::No CI checks appeared on $URL."
+            exit 1
+          fi
+          gh pr checks "$URL" --watch --fail-fast --interval 20
+
+      - name: Merge the sync PR
+        if: steps.ci.outcome == 'success'
+        env:
+          URL: ${{ steps.pr.outputs.url }}
+          SHA: ${{ steps.check.outputs.sha }}
+        # A merge commit, never squash or rebase: squashing would drop upstream's
+        # history and break the next merge; rebasing would rewrite it.
+        run: |
+          gh pr merge "$URL" --merge --delete-branch --subject "chore: sync upstream OpenSpec ($SHA)"
+
+      - name: Leave a note on CI failure
+        if: failure() && steps.pr.outputs.url != '' && steps.ci.outcome == 'failure'
+        env:
+          URL: ${{ steps.pr.outputs.url }}
+        run: |
+          gh pr comment "$URL" --body "CI failed on this upstream sync, so it was not merged. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
