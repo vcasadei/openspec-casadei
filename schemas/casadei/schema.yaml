@@ -390,7 +390,8 @@ apply:
     The human developer is the author of this work. Commits, merge requests,
     code comments, and documentation attribute them and no one else. Never add
     an AI signature, a `Co-authored-by:` trailer naming an AI or assistant, or
-    any other generative metadata to a commit message, MR description, or file.
+    any other generative metadata to a commit message, PR/MR description, or
+    file.
 
     This rule is deliberately duplicated in `~/.claude/CLAUDE.md` (written by
     `tools/install.sh --user`). This copy covers an `/opsx:apply` run in any
@@ -398,17 +399,62 @@ apply:
     CLAUDE.md copy covers every other session, where this instruction is not in
     context at all. Keep the two in sync when editing either.
 
-    ## Branching
+    ## Issue tracking & branching
 
     Never commit directly to `main` unless the user explicitly asks for it.
     Before starting implementation, if the work is not already on a suitable
-    branch, ask the user for the ticket ID and a brief title, then branch as:
+    branch, first establish how this project tracks work. Do not assume
+    JIRA: if it is not already obvious from the project (an existing
+    `<type>/<JIRA-KEY>-...` branch pattern elsewhere in `git log`, a linked
+    JIRA project, etc.), ask the user whether they use JIRA or GitHub
+    Issues/Projects for this repo.
+
+    ### JIRA
+
+    Ask for the ticket ID and a brief title, then branch as:
 
         <type>/<JIRA-KEY>-<kebab-case-title>
 
     for example `feat/PROJ-104-auth-flow` or `fix/PAY-882-retry-timeout`.
+    JIRA itself is not touched - the ticket ID is only a naming convention.
     Ask rather than inventing a ticket ID - a fabricated key is worse than a
     paused task.
+
+    ### GitHub Issues + Projects
+
+    No ticket ID to ask for - the agent creates the issues. Ask only for a
+    brief title, and, the first time a project uses this path, which GitHub
+    Project (board) to file work under; reuse that answer for later changes
+    in the same project instead of asking again.
+
+    Before branching, using the `gh` CLI:
+
+    1. Create the story issue for the change as a whole: `gh issue create
+       --title "<proposal title>" --body "<Why + What Changes from
+       proposal.md>"`. Note the issue number it prints.
+    2. Create one sub-issue per `##` task group in tasks.md - title from the
+       group name, body from that group's checkboxes - linked to the story
+       with `gh issue create --parent <story-issue-number> --title "..."
+       --body "..."`. Append each number to its group heading in tasks.md
+       (`## 1. Setup (#42)`) so later steps and other sessions can find it
+       without re-deriving it.
+    3. Add the story issue and every sub-issue to the project board: `gh
+       project item-add <project-number> --owner <owner> --url <issue-url>`.
+    4. Branch as:
+
+        <type>/<story-issue-number>-<kebab-case-title>
+
+    As implementation proceeds, keep the board honest, not only tasks.md:
+    when starting a task group, set its sub-issue's Status to "In Progress"
+    with `gh project item-edit <project-number> --owner <owner> --url
+    <issue-url> --field "Status" --value "In Progress"`; when every checkbox
+    in the group is checked, run the same command with `--value "Done"` and
+    close the sub-issue (`gh issue close <number>`); when every sub-issue is
+    closed, do both for the story issue too. A tasks.md checkbox and its
+    issue's state must never drift apart - update both in the same step, not
+    as a later cleanup pass. Do not create issues that already exist for this
+    change from a previous session - check the task group headings in
+    tasks.md for `(#N)` markers first and reuse them.
 
     ## Commits
 

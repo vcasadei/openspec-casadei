@@ -370,10 +370,15 @@ tasks plus rollback verification; `/docs/` updated in the same commit; a closing
 quality-gate group naming the project's real commands.
 
 **`apply`** — human authorship with no AI trailers; never commit to `main`
-unasked; branch as `<type>/<JIRA-KEY>-<kebab-case-title>`; Conventional Commits
-and linear history; minimal diff; idiomatic code matching existing patterns;
-standardized docblocks; no hardcoded secrets; `/docs/` in PT-BR; ask when
-ambiguous; verify build, lint, types before declaring the branch ready.
+unasked; JIRA or GitHub Issues/Projects (ask if it's not already obvious) —
+JIRA branches as `<type>/<JIRA-KEY>-<kebab-case-title>`, GitHub has the agent
+create a story issue plus one sub-issue per task group via `gh issue create
+--parent`, add them to the project board, branch as
+`<type>/<issue-number>-<kebab-case-title>`, and move each issue's board
+Status as tasks start and finish; Conventional Commits and linear history;
+minimal diff; idiomatic code matching existing patterns; standardized
+docblocks; no hardcoded secrets; `/docs/` in PT-BR; ask when ambiguous;
+verify build, lint, types before declaring the branch ready.
 
 ## What's deliberately unchanged
 
