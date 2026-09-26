@@ -259,4 +259,7 @@ foreach ($t in $tests) {
 
 Write-Host ""
 Write-Host "$($script:passed) passed, $($script:failed) failed"
+# Always exit explicitly: $LASTEXITCODE still holds the last installer run
+# (some cases expect it to fail), and CI hosts exit with it otherwise.
 if ($script:failed -gt 0) { exit 1 }
+exit 0
