@@ -1,8 +1,8 @@
-# CI for this fork: the install scripts and the casadei schema.
+# CI for this fork: the install and sync scripts, and the casadei schema.
 #
 # Named installers.yml rather than ci.yml because upstream ships its own
-# .github/workflows/ci.yml; a distinct name keeps tools/sync-upstream.sh from
-# ever seeing this file as an upstream conflict.
+# .github/workflows/ci.yml. tools/sync-upstream.sh keeps this file as-is on
+# every upstream merge.
 name: CI
 
 on:
@@ -10,6 +10,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Weekly, so a new CLI release that breaks the schema is caught even when
+  # nothing here changes.
+  schedule:
+    - cron: '0 5 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -27,8 +31,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: shellcheck tools/*.sh tools/tests/*.sh
 
-  install-sh:
-    name: install.sh (${{ matrix.os }})
+  bash:
+    name: bash scripts (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -37,9 +41,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./tools/tests/install.test.sh
+      - run: ./tools/tests/sync-upstream.test.sh
 
-  install-ps1:
-    name: install.ps1 (${{ matrix.shell }})
+  powershell:
+    name: PowerShell scripts (${{ matrix.shell }})
     strategy:
       fail-fast: false
       matrix:
@@ -49,28 +54,58 @@ jobs:
       - uses: actions/checkout@v4
       - shell: pwsh
         run: ./tools/tests/install.tests.ps1 -Shell ${{ matrix.shell }}
+      - shell: pwsh
+        run: ./tools/tests/sync-upstream.tests.ps1 -Shell ${{ matrix.shell }}
 
   schema:
-    name: Schema validates with the OpenSpec CLI
+    name: Schema validates (${{ matrix.cli }} CLI)
+    strategy:
+      fail-fast: false
+      matrix:
+        # npm:      the release users install, per the README.
+        # upstream: built from the newest upstream commit merged into this
+        #           fork - the exact version this fork claims to track.
+        cli: [npm, upstream]
     runs-on: ubuntu-latest
     env:
       OPENSPEC_TELEMETRY: '0'
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The upstream build needs history to find the merged upstream commit.
+          fetch-depth: ${{ matrix.cli == 'upstream' && '0' || '1' }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # Same command the README tells users to run, so CI catches a CLI
-      # release that breaks the schema before anyone installs it.
-      - run: npm install -g @fission-ai/openspec@latest
-      - run: openspec --version
+
+      - name: Install the CLI from npm
+        if: matrix.cli == 'npm'
+        run: |
+          npm install -g @fission-ai/openspec@latest
+          echo "OPENSPEC=openspec" >> "$GITHUB_ENV"
+
+      - name: Build the CLI from the merged upstream commit
+        if: matrix.cli == 'upstream'
+        run: |
+          git fetch --no-tags --quiet https://github.com/Fission-AI/OpenSpec.git main
+          base="$(git merge-base HEAD FETCH_HEAD)"
+          echo "Upstream commit: $(git log -1 --format='%h %s' "$base")"
+          cli="$RUNNER_TEMP/openspec-upstream"
+          git worktree add --quiet --detach "$cli" "$base"
+          cd "$cli"
+          corepack pnpm install --frozen-lockfile --ignore-scripts
+          corepack pnpm run build
+          echo "OPENSPEC=node $cli/bin/openspec.js" >> "$GITHUB_ENV"
+
       - name: Install into a fresh project and validate
         run: |
+          $OPENSPEC --version
           project="$(mktemp -d)"
-          (cd "$project" && openspec init --tools none < /dev/null)
+          (cd "$project" && $OPENSPEC init --tools none < /dev/null)
           ./tools/install.sh --project "$project" --claude
           cd "$project"
           grep -qx 'schema: casadei' openspec/config.yaml
-          openspec schema which casadei | tee which.txt
+          $OPENSPEC schema which casadei | tee which.txt
           grep -q 'Source: project' which.txt
-          openspec schema validate casadei
+          $OPENSPEC schema validate casadei
