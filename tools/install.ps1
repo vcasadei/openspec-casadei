@@ -134,7 +134,9 @@ function Install-ClaudeMd([string]$File) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
     if (-not (Test-Path $file)) {
-        ($BlockBegin, $body, $BlockEnd) -join "`n" | Set-Content $file -Encoding utf8
+        # Written line by line, exactly as a refresh writes it, so re-running
+        # never rewrites the line endings of a committed CLAUDE.md.
+        @($BlockBegin) + @($body -split "`r?`n") + @($BlockEnd) | Set-Content $file -Encoding utf8
         Write-Host "   Created $file with the authorship rule."
         return
     }

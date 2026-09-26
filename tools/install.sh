@@ -113,11 +113,18 @@ install_claude_md() {
 
   if grep -qF "$BLOCK_BEGIN" "$file"; then
     if grep -qF "$BLOCK_END" "$file"; then
-      awk -v b="$BLOCK_BEGIN" -v e="$BLOCK_END" -v body="$body" '
-        index($0, b) { print; print body; skip = 1; next }
+      # The body goes through ENVIRON, not -v: BSD awk (macOS) rejects a -v
+      # value containing a newline.
+      if ! RULE_BODY="$body" awk -v b="$BLOCK_BEGIN" -v e="$BLOCK_END" '
+        index($0, b) { print; print ENVIRON["RULE_BODY"]; skip = 1; next }
         skip && index($0, e) { print; skip = 0; next }
         !skip { print }
-      ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+      ' "$file" > "$file.tmp"; then
+        rm -f "$file.tmp"
+        echo "Error: could not refresh the authorship rule in $file" >&2
+        return 1
+      fi
+      mv "$file.tmp" "$file"
       echo "   Refreshed the authorship rule in $file."
     else
       echo "!  $file has an opening marker but no closing one - left unchanged."
