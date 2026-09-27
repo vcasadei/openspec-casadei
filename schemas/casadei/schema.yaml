@@ -66,7 +66,21 @@ artifacts:
 
       **Impact must also cover**, when the change touches them: personal data
       (LGPD scope), database schema, message consumers or queues, and public
-      API surface. These drive design and task requirements downstream.
+      API surface. These drive design and task requirements downstream. When
+      the change introduces a new secret (an API key, a password, a signing
+      key), say so in **Impact** by name - never by value.
+
+      **No real secrets or personal data in the artifacts.** Proposals, specs,
+      designs, and task lists are committed, and their text is copied into
+      issue trackers. Never paste a real credential, token, private key,
+      connection string with a password, or real customer data into them,
+      even when the ticket or the prompt contains one - use a placeholder such
+      as `<DB_PASSWORD>` or an obviously fake value, and tell the user the
+      source contained a secret.
+
+      If `openspec/secrets-policy.md` exists, it is this project's secrets
+      policy: read it before writing **Impact**, and follow it wherever it is
+      stricter than these rules.
 
       This is the foundation - specs, design, and tasks all build on this.
     requires: []
@@ -294,7 +308,14 @@ artifacts:
       technical choice rather than a behavioral contract:
       - Where secrets come from. Configuration loads strictly from environment
         variables or a secret vault; there are no hardcoded credentials or test
-        tokens, in any file, including tests and fixtures.
+        tokens, in any file, including tests and fixtures. Name every new
+        secret, the store it lives in for each environment, and who can read
+        it - by name and location, never by value.
+      - How a new secret reaches a developer's machine without being
+        committed: a gitignored `.env` plus a placeholder entry in
+        `.env.example`, or the project's secret manager.
+      - If `openspec/secrets-policy.md` exists, the choices above follow it;
+        where it leaves a store undecided, ask the user rather than picking one.
       - How personal data is masked or redacted before it reaches logs,
         metrics, or telemetry.
       - How correlation IDs and OpenTelemetry tracing headers propagate across
@@ -402,7 +423,15 @@ artifacts:
       threshold holds. Name the actual commands the project uses rather than
       describing them generically. These are whole-branch integration checks,
       the only kind a final group may hold - never tests or docs an earlier
-      group owed.
+      group owed. When the project has a secret scanner configured (for
+      example a `gitleaks` hook in `.pre-commit-config.yaml`), include a task
+      that runs it over the branch: `pre-commit run gitleaks --all-files`.
+
+      **New secrets carry their own tasks.** When the change introduces a
+      secret, include tasks to add its placeholder to `.env.example` (or the
+      project's equivalent), to confirm the real file is gitignored, and to
+      register it in the store the design names - in the group that first
+      needs the secret.
 
       Reference specs for what needs to be built, design for how to build it.
     requires:
@@ -528,6 +557,30 @@ apply:
     No hardcoded credentials or tokens, including in tests and fixtures.
     Configuration loads strictly from environment variables or a secret vault.
     Personal data and credentials never reach logs, metrics, or telemetry.
+
+    If `openspec/secrets-policy.md` exists, it is this project's secrets
+    policy: read it before the first task and follow it wherever it is
+    stricter than this section.
+
+    Keep secrets out of git:
+    - Before every commit, read `git diff --staged` and look for credentials,
+      tokens, private keys, connection strings, `.env` files, and real
+      personal data. Stage files by name - never `git add -A` or `git add .`,
+      which pick up whatever happens to be lying in the working tree.
+    - Files that hold real secrets (`.env`, `.env.*`, `*.pem`, `*.key`,
+      keystores, cloud credential files) are gitignored. If one is not, add
+      the ignore rule before anything else and tell the user. Commit only a
+      `.env.example` with placeholder values, and add every new variable to it.
+    - Never print a secret's value in a commit message, an issue or PR body,
+      a code comment, or your own output. Refer to it by name.
+    - When a secret scanner (a `gitleaks` pre-commit hook, a CI scan) flags
+      something, fix the cause. Never bypass it with `--no-verify`, and never
+      allowlist a finding (`.gitleaksignore`, `gitleaks:allow`) without the
+      user's approval and a stated reason.
+    - If you find a secret already committed - in this branch or in history -
+      stop and tell the user. Deleting it in a new commit does not remove it
+      from history: the secret must be rotated first, and history rewritten
+      only if the user decides to. Treat any pushed secret as compromised.
 
     ## Documentation
 
