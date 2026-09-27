@@ -14,6 +14,9 @@ SCHEMA_SRC="$REPO_ROOT/schemas/casadei"
 RULE_FILE="$REPO_ROOT/tools/authorship.md"
 BLOCK_BEGIN="<!-- BEGIN openspec-casadei: authorship -->"
 BLOCK_END="<!-- END openspec-casadei: authorship -->"
+SECRETS_DIR="$REPO_ROOT/tools/secrets"
+SECRETS_BEGIN="# BEGIN openspec-casadei: secrets"
+SECRETS_END="# END openspec-casadei: secrets"
 
 passed=0
 failed=0
@@ -30,9 +33,9 @@ assert_no_file()  { [ ! -e "$1" ] || fail "expected no file at $1"; }
 assert_contains() { grep -qF -- "$2" "$1" 2>/dev/null || fail "expected $1 to contain: $2"; }
 assert_eq()       { [ "$1" = "$2" ] || fail "expected '$2', got '$1'${3:+ ($3)}"; }
 
-# Lines strictly between the authorship markers.
+# Lines strictly between two markers (the authorship ones by default).
 block_body() {
-  awk -v b="$BLOCK_BEGIN" -v e="$BLOCK_END" '
+  awk -v b="${2:-$BLOCK_BEGIN}" -v e="${3:-$BLOCK_END}" '
     index($0, e) { inside = 0 }
     inside       { print }
     index($0, b) { inside = 1 }
@@ -184,6 +187,115 @@ test_project_rejects_missing_directory() {
   assert_eq "$status" "1" "exit status"
 }
 
+# --- --secrets ---------------------------------------------------------------
+
+assert_secret_ignores() {
+  assert_eq "$(block_body "$1" "$SECRETS_BEGIN" "$SECRETS_END")" "$(cat "$SECRETS_DIR/gitignore")" "secrets block in $1"
+  assert_eq "$(grep -cF "$SECRETS_BEGIN" "$1")" "1" "secrets begin markers in $1"
+}
+
+test_project_without_secrets_writes_no_secret_files() {
+  local p; p="$(new_project p)"
+  run_install --project "$p"
+  assert_no_file "$p/.gitignore"
+  assert_no_file "$p/.pre-commit-config.yaml"
+  assert_no_file "$p/.github"
+  assert_no_file "$p/openspec/secrets-policy.md"
+}
+
+test_secrets_medium_installs_tooling() {
+  local p; p="$(new_project p)"
+  run_install --project "$p" --secrets medium
+  assert_eq "$status" "0" "exit status"
+  assert_secret_ignores "$p/.gitignore"
+  cmp -s "$SECRETS_DIR/pre-commit-config.yaml" "$p/.pre-commit-config.yaml" || fail "pre-commit config differs"
+  cmp -s "$SECRETS_DIR/secret-scan.yml" "$p/.github/workflows/secret-scan.yml" || fail "workflow differs"
+  assert_no_file "$p/openspec/secrets-policy.md"
+  assert_contains <(echo "$out") "pre-commit install"
+}
+
+test_secrets_high_adds_policy() {
+  local p; p="$(new_project p)"
+  run_install --project "$p" --secrets high
+  assert_eq "$status" "0" "exit status"
+  assert_secret_ignores "$p/.gitignore"
+  assert_file "$p/.pre-commit-config.yaml"
+  assert_file "$p/.github/workflows/secret-scan.yml"
+  cmp -s "$SECRETS_DIR/secrets-policy.md" "$p/openspec/secrets-policy.md" || fail "policy differs"
+}
+
+test_secrets_is_idempotent() {
+  local p before; p="$(new_project p)"
+  run_install --project "$p" --secrets high
+  before="$(cat "$p/.gitignore" "$p/.pre-commit-config.yaml" "$p/.github/workflows/secret-scan.yml" "$p/openspec/secrets-policy.md")"
+  run_install --project "$p" --secrets high
+  assert_eq "$status" "0" "exit status on re-run"
+  assert_eq "$(cat "$p/.gitignore" "$p/.pre-commit-config.yaml" "$p/.github/workflows/secret-scan.yml" "$p/openspec/secrets-policy.md")" "$before" "files after re-run"
+  assert_contains <(echo "$out") "Refreshed the secret ignore rules"
+}
+
+test_secrets_appends_to_existing_gitignore() {
+  local p; p="$(new_project p)"
+  printf 'node_modules/\ndist/\n' > "$p/.gitignore"
+  run_install --project "$p" --secrets medium
+  assert_eq "$(head -2 "$p/.gitignore")" "$(printf 'node_modules/\ndist/')" "existing ignore rules"
+  assert_secret_ignores "$p/.gitignore"
+}
+
+test_secrets_keeps_existing_pre_commit_config() {
+  local p before; p="$(new_project p)"
+  printf 'repos:\n  - repo: https://github.com/psf/black\n    rev: 24.1.0\n    hooks:\n      - id: black\n' > "$p/.pre-commit-config.yaml"
+  before="$(cat "$p/.pre-commit-config.yaml")"
+  run_install --project "$p" --secrets medium
+  assert_eq "$status" "0" "exit status"
+  assert_eq "$(cat "$p/.pre-commit-config.yaml")" "$before" "existing pre-commit config"
+  assert_contains <(echo "$out") "without a gitleaks hook"
+}
+
+test_secrets_never_overwrites_edited_policy() {
+  local p; p="$(new_project p)"
+  run_install --project "$p" --secrets high
+  echo "| Production | Vault | env |" >> "$p/openspec/secrets-policy.md"
+  run_install --project "$p" --secrets high
+  assert_eq "$status" "0" "exit status"
+  assert_contains "$p/openspec/secrets-policy.md" "| Production | Vault | env |"
+  assert_contains <(echo "$out") "left unchanged"
+}
+
+test_secrets_warns_about_committed_env_file() {
+  local p; p="$(new_project p)"
+  echo "API_KEY=placeholder" > "$p/.env"
+  git -C "$p" init -q
+  git -C "$p" add .env
+  git -C "$p" -c user.email=t@example.com -c user.name=t commit -qm init
+  run_install --project "$p" --secrets medium
+  assert_eq "$status" "0" "exit status"
+  assert_contains <(echo "$out") "still tracked"
+  assert_contains <(echo "$out") "     .env"
+}
+
+test_secrets_requires_a_level() {
+  local p; p="$(new_project p)"
+  run_install --project "$p" --secrets
+  assert_eq "$status" "1" "exit status"
+  assert_no_file "$p/openspec/schemas/casadei"
+}
+
+test_secrets_rejects_unknown_level() {
+  local p; p="$(new_project p)"
+  run_install --project "$p" --secrets low
+  assert_eq "$status" "1" "exit status"
+  assert_contains <(echo "$out") "'medium' or 'high'"
+  assert_no_file "$p/openspec/schemas/casadei"
+}
+
+test_secrets_rejects_user_mode() {
+  run_install --user --secrets medium
+  assert_eq "$status" "1" "exit status"
+  assert_contains <(echo "$out") "--secrets only applies to --project"
+  assert_no_file "$SANDBOX/xdg/openspec/schemas/casadei"
+}
+
 # --- --user ------------------------------------------------------------------
 
 test_user_installs_schema_and_claude_md() {
@@ -230,6 +342,7 @@ test_help_documents_claude_flag() {
   run_install --help
   assert_eq "$status" "0" "exit status"
   assert_contains <(echo "$out") "--claude"
+  assert_contains <(echo "$out") "--secrets LEVEL"
 }
 
 echo "tools/install.sh"

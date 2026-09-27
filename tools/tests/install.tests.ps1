@@ -27,6 +27,9 @@ $SchemaSrc  = Join-Path $RepoRoot 'schemas\casadei'
 $RuleFile   = Join-Path $RepoRoot 'tools\authorship.md'
 $BlockBegin = '<!-- BEGIN openspec-casadei: authorship -->'
 $BlockEnd   = '<!-- END openspec-casadei: authorship -->'
+$SecretsDir   = Join-Path $RepoRoot 'tools\secrets'
+$SecretsBegin = '# BEGIN openspec-casadei: secrets'
+$SecretsEnd   = '# END openspec-casadei: secrets'
 
 $script:passed = 0
 $script:failed = 0
@@ -45,12 +48,13 @@ function Assert-Match([string]$Text, [string]$Needle) {
     if (-not $Text.Contains($Needle)) { Fail "expected output to contain: $Needle" }
 }
 
-# Lines strictly between the authorship markers, joined with LF.
-function Get-BlockBody([string]$File) {
+# Lines strictly between two markers (the authorship ones by default),
+# joined with LF.
+function Get-BlockBody([string]$File, [string]$Begin = $BlockBegin, [string]$End = $BlockEnd) {
     if (-not (Test-Path $File)) { return $null }
     $lines = @(Get-Content $File)
-    $b = [Array]::IndexOf($lines, $BlockBegin)
-    $e = [Array]::IndexOf($lines, $BlockEnd)
+    $b = [Array]::IndexOf($lines, $Begin)
+    $e = [Array]::IndexOf($lines, $End)
     if ($b -lt 0 -or $e -le $b) { return $null }
     if ($e -eq $b + 1) { return '' }
     return ($lines[($b + 1)..($e - 1)] -join "`n")
@@ -191,6 +195,122 @@ function Test-ProjectRefusesToClobberDivergedSchema {
     Invoke-Install -Project $p
     Assert-Eq $script:status 1 'exit status'
     if (-not ((Get-Content $schema -Raw).Contains('# local edit'))) { Fail 'local edit was discarded' }
+}
+
+# --- -Secrets ----------------------------------------------------------------
+
+function Assert-SecretIgnores([string]$File) {
+    $expected = (Get-Content (Join-Path $SecretsDir 'gitignore') -Raw) -replace '\r', '' -replace '\s+$', ''
+    Assert-Eq (Get-BlockBody $File $SecretsBegin $SecretsEnd) $expected "secrets block in $File"
+    $count = @(Get-Content $File | Where-Object { $_ -eq $SecretsBegin }).Count
+    Assert-Eq $count 1 "secrets begin markers in $File"
+}
+
+function Assert-SameFile([string]$A, [string]$B, [string]$What) {
+    if (-not (Test-Path $B)) { Fail "expected $B to exist"; return }
+    if ((Get-FileHash $A).Hash -ne (Get-FileHash $B).Hash) { Fail "$What differs from $A" }
+}
+
+function Test-ProjectWithoutSecretsWritesNoSecretFiles {
+    $p = New-Project 'p'
+    Invoke-Install -Project $p
+    Assert-NoFile (Join-Path $p '.gitignore')
+    Assert-NoFile (Join-Path $p '.pre-commit-config.yaml')
+    Assert-NoFile (Join-Path $p '.github')
+    Assert-NoFile (Join-Path $p 'openspec\secrets-policy.md')
+}
+
+function Test-SecretsMediumInstallsTooling {
+    $p = New-Project 'p'
+    Invoke-Install -Project $p -Secrets medium
+    Assert-Eq $script:status 0 'exit status'
+    Assert-SecretIgnores (Join-Path $p '.gitignore')
+    Assert-SameFile (Join-Path $SecretsDir 'pre-commit-config.yaml') (Join-Path $p '.pre-commit-config.yaml') 'pre-commit config'
+    Assert-SameFile (Join-Path $SecretsDir 'secret-scan.yml') (Join-Path $p '.github\workflows\secret-scan.yml') 'workflow'
+    Assert-NoFile (Join-Path $p 'openspec\secrets-policy.md')
+    Assert-Match $script:out 'pre-commit install'
+}
+
+function Test-SecretsHighAddsPolicy {
+    $p = New-Project 'p'
+    Invoke-Install -Project $p -Secrets high
+    Assert-Eq $script:status 0 'exit status'
+    Assert-SecretIgnores (Join-Path $p '.gitignore')
+    Assert-File (Join-Path $p '.pre-commit-config.yaml')
+    Assert-File (Join-Path $p '.github\workflows\secret-scan.yml')
+    Assert-SameFile (Join-Path $SecretsDir 'secrets-policy.md') (Join-Path $p 'openspec\secrets-policy.md') 'policy'
+}
+
+function Test-SecretsIsIdempotent {
+    $p = New-Project 'p'
+    $files = @('.gitignore', '.pre-commit-config.yaml', '.github\workflows\secret-scan.yml', 'openspec\secrets-policy.md') |
+        ForEach-Object { Join-Path $p $_ }
+    Invoke-Install -Project $p -Secrets high
+    $before = ($files | ForEach-Object { Get-Content $_ -Raw }) -join '|'
+    Invoke-Install -Project $p -Secrets high
+    Assert-Eq $script:status 0 'exit status on re-run'
+    Assert-Eq (($files | ForEach-Object { Get-Content $_ -Raw }) -join '|') $before 'files after re-run'
+    Assert-Match $script:out 'Refreshed the secret ignore rules'
+}
+
+function Test-SecretsAppendsToExistingGitignore {
+    $p = New-Project 'p'
+    $file = Join-Path $p '.gitignore'
+    @('node_modules/', 'dist/') | Set-Content $file
+    Invoke-Install -Project $p -Secrets medium
+    $lines = @(Get-Content $file)
+    Assert-Eq ($lines[0..1] -join '|') 'node_modules/|dist/' 'existing ignore rules'
+    Assert-SecretIgnores $file
+}
+
+function Test-SecretsKeepsExistingPreCommitConfig {
+    $p = New-Project 'p'
+    $file = Join-Path $p '.pre-commit-config.yaml'
+    @('repos:', '  - repo: https://github.com/psf/black', '    rev: 24.1.0', '    hooks:', '      - id: black') | Set-Content $file
+    $before = Get-Content $file -Raw
+    Invoke-Install -Project $p -Secrets medium
+    Assert-Eq $script:status 0 'exit status'
+    Assert-Eq (Get-Content $file -Raw) $before 'existing pre-commit config'
+    Assert-Match $script:out 'without a gitleaks hook'
+}
+
+function Test-SecretsNeverOverwritesEditedPolicy {
+    $p = New-Project 'p'
+    $file = Join-Path $p 'openspec\secrets-policy.md'
+    Invoke-Install -Project $p -Secrets high
+    Add-Content $file '| Production | Vault | env |'
+    Invoke-Install -Project $p -Secrets high
+    Assert-Eq $script:status 0 'exit status'
+    if (-not (Select-String -Path $file -Pattern '| Production | Vault | env |' -SimpleMatch -Quiet)) { Fail 'edited policy was overwritten' }
+    Assert-Match $script:out 'left unchanged'
+}
+
+function Test-SecretsWarnsAboutCommittedEnvFile {
+    $p = New-Project 'p'
+    'API_KEY=placeholder' | Set-Content (Join-Path $p '.env')
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & git -C $p init -q 2>&1 | Out-Null
+    & git -C $p add .env 2>&1 | Out-Null
+    & git -C $p -c user.email=t@example.com -c user.name=t commit -qm init 2>&1 | Out-Null
+    $ErrorActionPreference = $prev
+    Invoke-Install -Project $p -Secrets medium
+    Assert-Eq $script:status 0 'exit status'
+    Assert-Match $script:out 'still tracked'
+    Assert-Match $script:out '     .env'
+}
+
+function Test-SecretsRejectsUnknownLevel {
+    $p = New-Project 'p'
+    Invoke-Install -Project $p -Secrets low
+    if ($script:status -eq 0) { Fail 'expected a non-zero exit status' }
+    Assert-NoFile (Join-Path $p 'openspec\schemas\casadei')
+}
+
+function Test-SecretsRejectsUserMode {
+    Invoke-Install -User -Secrets medium
+    if ($script:status -eq 0) { Fail 'expected a non-zero exit status' }
+    Assert-NoFile (Join-Path $script:Sandbox 'xdg\openspec\schemas\casadei')
 }
 
 # --- -User -------------------------------------------------------------------

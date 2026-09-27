@@ -12,6 +12,11 @@
 #   --no-claude-md   (with --user) skip writing ~/.claude/CLAUDE.md
 #   --claude         (with --project) also write the authorship rule into
 #                    <project>/CLAUDE.md, so it is committed with the repo
+#   --secrets LEVEL  (with --project) also set up secret protection:
+#                      medium - .gitignore rules, a gitleaks pre-commit hook,
+#                               and a GitHub Actions secret scan
+#                      high   - medium, plus openspec/secrets-policy.md
+#                    The schema's own secret rules apply at every level.
 #
 # See README.md for the resolution order.
 set -euo pipefail
@@ -22,9 +27,12 @@ SOURCE_DIR="$REPO_ROOT/schemas/$SCHEMA_NAME"
 BLOCK_BEGIN="<!-- BEGIN openspec-casadei: authorship -->"
 BLOCK_END="<!-- END openspec-casadei: authorship -->"
 RULE_FILE="$REPO_ROOT/tools/authorship.md"
+SECRETS_DIR="$REPO_ROOT/tools/secrets"
+SECRETS_BEGIN="# BEGIN openspec-casadei: secrets"
+SECRETS_END="# END openspec-casadei: secrets"
 
 usage() {
-  sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit "${1:-1}"
 }
 
@@ -82,50 +90,41 @@ set_project_schema() {
   echo "   Set 'schema: $SCHEMA_NAME' in openspec/config.yaml (was 'spec-driven')."
 }
 
-# Install the authorship rule into a CLAUDE.md.
+# Write a delimited block into a file, idempotently: create the file if it is
+# missing, append the block if the file has none, otherwise rewrite only what
+# is between the markers. Everything outside the block is left untouched.
 #
-# It lives here rather than only in the schema's apply instruction because the
-# apply instruction is only in context during an /opsx:apply run - a plain
-# "commit this" would never see it. Written inside a delimited block so the
-# file can be re-written idempotently without touching anything else in it.
-#
-#   $1 - target file: ~/.claude/CLAUDE.md (--user) or <project>/CLAUDE.md
-#        (--project --claude)
-install_claude_md() {
-  local file="$1"
-  local dir
-  dir="$(dirname "$file")"
-  local body
-  # Single source shared with install.ps1, so the two installers cannot drift.
-  if [ ! -f "$RULE_FILE" ]; then
-    echo "Error: authorship rule not found at $RULE_FILE" >&2
-    return 1
-  fi
-  body="$(cat "$RULE_FILE")"
+#   $1 - target file
+#   $2 - opening marker line
+#   $3 - closing marker line
+#   $4 - block body
+#   $5 - what the block is, for messages ("the authorship rule")
+install_block() {
+  local file="$1" begin="$2" end="$3" body="$4" what="$5"
 
-  mkdir -p "$dir"
+  mkdir -p "$(dirname "$file")"
 
   if [ ! -f "$file" ]; then
-    { echo "$BLOCK_BEGIN"; echo "$body"; echo "$BLOCK_END"; } > "$file"
-    echo "   Created $file with the authorship rule."
+    { echo "$begin"; echo "$body"; echo "$end"; } > "$file"
+    echo "   Created $file with $what."
     return 0
   fi
 
-  if grep -qF "$BLOCK_BEGIN" "$file"; then
-    if grep -qF "$BLOCK_END" "$file"; then
+  if grep -qF "$begin" "$file"; then
+    if grep -qF "$end" "$file"; then
       # The body goes through ENVIRON, not -v: BSD awk (macOS) rejects a -v
       # value containing a newline.
-      if ! RULE_BODY="$body" awk -v b="$BLOCK_BEGIN" -v e="$BLOCK_END" '
-        index($0, b) { print; print ENVIRON["RULE_BODY"]; skip = 1; next }
+      if ! BLOCK_BODY="$body" awk -v b="$begin" -v e="$end" '
+        index($0, b) { print; print ENVIRON["BLOCK_BODY"]; skip = 1; next }
         skip && index($0, e) { print; skip = 0; next }
         !skip { print }
       ' "$file" > "$file.tmp"; then
         rm -f "$file.tmp"
-        echo "Error: could not refresh the authorship rule in $file" >&2
+        echo "Error: could not refresh $what in $file" >&2
         return 1
       fi
       mv "$file.tmp" "$file"
-      echo "   Refreshed the authorship rule in $file."
+      echo "   Refreshed $what in $file."
     else
       echo "!  $file has an opening marker but no closing one - left unchanged."
       echo "   Repair it by hand, then re-run."
@@ -133,14 +132,113 @@ install_claude_md() {
     return 0
   fi
 
-  { echo; echo "$BLOCK_BEGIN"; echo "$body"; echo "$BLOCK_END"; } >> "$file"
-  echo "   Appended the authorship rule to $file (existing content kept)."
+  { echo; echo "$begin"; echo "$body"; echo "$end"; } >> "$file"
+  echo "   Appended $what to $file (existing content kept)."
+}
+
+# Install the authorship rule into a CLAUDE.md.
+#
+# It lives here rather than only in the schema's apply instruction because the
+# apply instruction is only in context during an /opsx:apply run - a plain
+# "commit this" would never see it.
+#
+#   $1 - target file: ~/.claude/CLAUDE.md (--user) or <project>/CLAUDE.md
+#        (--project --claude)
+install_claude_md() {
+  # Single source shared with install.ps1, so the two installers cannot drift.
+  if [ ! -f "$RULE_FILE" ]; then
+    echo "Error: authorship rule not found at $RULE_FILE" >&2
+    return 1
+  fi
+  install_block "$1" "$BLOCK_BEGIN" "$BLOCK_END" "$(cat "$RULE_FILE")" "the authorship rule"
+}
+
+# Copy a file into the project unless one is already there. An existing file
+# is never overwritten: the project may have edited it, and a policy or
+# workflow it has made its own is not ours to replace.
+#
+#   $1 - source file under tools/secrets/
+#   $2 - destination
+#   $3 - what the file is, for messages
+install_file() {
+  local src="$1" dest="$2" what="$3"
+  if [ ! -e "$dest" ]; then
+    mkdir -p "$(dirname "$dest")"
+    cp "$src" "$dest"
+    echo "   Created $dest ($what)."
+  elif cmp -s "$src" "$dest"; then
+    echo "   $dest is already up to date."
+  else
+    echo "!  $dest already exists and differs from this repo's copy - left unchanged."
+    echo "   Compare it with $src by hand."
+  fi
+}
+
+# Set up secret protection in a project. The schema's rules already apply;
+# these add the tooling that enforces them.
+#
+#   $1 - project root
+#   $2 - level: medium or high
+install_secrets() {
+  local root="$1" level="$2"
+  local precommit="$root/.pre-commit-config.yaml"
+
+  echo
+  echo "Secret protection ($level):"
+
+  install_block "$root/.gitignore" "$SECRETS_BEGIN" "$SECRETS_END" \
+    "$(cat "$SECRETS_DIR/gitignore")" "the secret ignore rules"
+
+  if [ ! -e "$precommit" ]; then
+    cp "$SECRETS_DIR/pre-commit-config.yaml" "$precommit"
+    echo "   Created $precommit (gitleaks pre-commit hook)."
+  elif grep -q 'gitleaks' "$precommit"; then
+    echo "   $precommit already runs gitleaks."
+  else
+    echo "!  $precommit exists without a gitleaks hook - left unchanged."
+    echo "   Add the 'repos:' entry from $SECRETS_DIR/pre-commit-config.yaml by hand."
+  fi
+
+  install_file "$SECRETS_DIR/secret-scan.yml" "$root/.github/workflows/secret-scan.yml" \
+    "GitHub Actions secret scan"
+
+  if [ "$level" = "high" ]; then
+    install_file "$SECRETS_DIR/secrets-policy.md" "$root/openspec/secrets-policy.md" \
+      "secrets policy - fill in its 'Where secrets live' table"
+  fi
+
+  # The ignore rules do nothing for a file that is already committed.
+  if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    local tracked
+    tracked="$(git -C "$root" ls-files -ci --exclude-standard)"
+    if [ -n "$tracked" ]; then
+      echo "!  These committed files match the secret ignore rules and are still tracked:"
+      while IFS= read -r f; do echo "     $f"; done <<< "$tracked"
+      echo "   If one holds a real secret, rotate it first - it is in git history."
+      echo "   Then untrack it with: git rm --cached <file>"
+    fi
+  fi
+
+  echo
+  echo "   Next steps:"
+  echo "   1. In every clone: pre-commit install"
+  echo "   2. Turn on GitHub secret scanning and push protection (repo admin;"
+  echo "      private repos need GitHub Advanced Security) under Settings >"
+  echo "      Code security, or:"
+  echo "        gh api -X PATCH repos/<owner>/<repo> \\"
+  echo "          -f 'security_and_analysis[secret_scanning][status]=enabled' \\"
+  echo "          -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled'"
+  if [ "$level" = "high" ]; then
+    echo "   3. Fill in the 'Where secrets live' table in openspec/secrets-policy.md."
+  fi
 }
 
 mode=""
 project_path=""
 write_claude_md=1
 project_claude_md=0
+secrets_level=""
+secrets_given=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -148,6 +246,7 @@ while [ $# -gt 0 ]; do
     --project)       mode="project"; project_path="${2:-.}"; shift 2 ;;
     --no-claude-md)  write_claude_md=0; shift ;;
     --claude)        project_claude_md=1; shift ;;
+    --secrets)       secrets_given=1; secrets_level="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
     -h|--help)       usage 0 ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
   esac
@@ -158,6 +257,14 @@ if [ "$project_claude_md" -eq 1 ] && [ "$mode" != "project" ]; then
   echo "Error: --claude only applies to --project (--user already writes ~/.claude/CLAUDE.md)" >&2
   exit 1
 fi
+if [ "$secrets_given" -eq 1 ] && [ "$mode" != "project" ]; then
+  echo "Error: --secrets only applies to --project" >&2
+  exit 1
+fi
+case "$secrets_given:$secrets_level" in
+  0:|1:medium|1:high) ;;
+  *) echo "Error: --secrets takes 'medium' or 'high', got '$secrets_level'" >&2; exit 1 ;;
+esac
 [ -d "$SOURCE_DIR" ] || { echo "Error: schema not found at $SOURCE_DIR" >&2; exit 1; }
 
 if [ "$mode" = "user" ]; then
@@ -190,6 +297,9 @@ if [ "$mode" = "project" ]; then
   set_project_schema "$project_root"
   if [ "$project_claude_md" -eq 1 ]; then
     install_claude_md "$project_root/CLAUDE.md"
+  fi
+  if [ -n "$secrets_level" ]; then
+    install_secrets "$project_root" "$secrets_level"
   fi
   echo
   echo "Verify with: openspec schema which $SCHEMA_NAME"

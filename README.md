@@ -85,7 +85,7 @@ Each mode does more than copy files:
 | Mode | Also does |
 |---|---|
 | `--user` | Writes the **authorship rule** into `~/.claude/CLAUDE.md`, so it applies to *every* session — not just an `/opsx:apply` run |
-| `--project` | **Selects the schema** in that project's `openspec/config.yaml`, so there's nothing left to edit by hand. Add `--claude` to also write the **authorship rule** into `<project>/CLAUDE.md` |
+| `--project` | **Selects the schema** in that project's `openspec/config.yaml`, so there's nothing left to edit by hand. Add `--claude` to also write the **authorship rule** into `<project>/CLAUDE.md`, and `--secrets medium\|high` to add **secret protection** ([below](#secret-protection)) |
 
 ### Option A — machine-wide (recommended for my own projects)
 
@@ -164,6 +164,56 @@ Claude Code loads the project `CLAUDE.md` in every session, the rule then
 applies to every session in that repo for **everyone** who clones it, not just to
 `/opsx:apply` runs and not just on my machine. `--claude` is rejected with
 `--user`, which already writes `~/.claude/CLAUDE.md`.
+
+#### Secret protection
+
+Keeping secrets out of git works at three levels. The first always applies; the
+other two are opt-in per project:
+
+| Level | How | What you get |
+|---|---|---|
+| default | nothing to pass | The schema's rules: no real secrets or personal data in proposals, designs, tasks, or issue bodies; new secrets named (never valued) in Impact and design, with `.env.example` and store tasks; before every commit, read `git diff --staged`, stage by name, keep secret files gitignored; never bypass or allowlist a scanner finding unasked; a committed secret means stop and rotate |
+| `medium` | `--secrets medium` | The default, plus tools that **enforce** it: a delimited block of secret ignore rules in `.gitignore`, a [gitleaks](https://github.com/gitleaks/gitleaks) pre-commit hook in `.pre-commit-config.yaml`, and `.github/workflows/secret-scan.yml`, which scans the whole history on every push and PR |
+| `high` | `--secrets high` | `medium`, plus `openspec/secrets-policy.md`: runtime secret storage (a secret manager instead of long-lived plaintext `.env`, OIDC instead of stored cloud keys in CI, GitHub Environments for production, rotation periods) and a leak runbook. The schema tells the agent to follow it and to ask while its "Where secrets live" table still says `TBD` |
+
+```powershell
+# Windows
+.\tools\install.ps1 -Project C:\path\to\your-project -Secrets high
+```
+
+```bash
+# macOS / Linux
+./tools/install.sh --project /path/to/your-project --secrets high
+```
+
+What each file does on a re-run:
+
+| File | First run | Re-run |
+|---|---|---|
+| `.gitignore` | Block created or appended; your rules are kept | Only the block is rewritten |
+| `.pre-commit-config.yaml` | Created | Left alone. An existing file without gitleaks is **not** edited; you get a warning and the entry to add |
+| `.github/workflows/secret-scan.yml` | Created | Left alone if it differs, with a warning |
+| `openspec/secrets-policy.md` (`high`) | Created | **Never overwritten**, since you're meant to fill it in |
+
+If the project is a git repo, the installer also lists committed files that now
+match the ignore rules (a tracked `.env`, say). Ignoring a file doesn't untrack
+it, and the secret is already in history, so rotate it before
+`git rm --cached`.
+
+Two steps the installer can't do for you, and prints at the end:
+
+1. `pre-commit install` in every clone. The hook does nothing until then; the
+   CI scan is the backstop for a clone that skipped it.
+2. Turning on GitHub **secret scanning and push protection** (Settings → Code
+   security). It needs a repo admin, and private repos need GitHub Advanced
+   Security.
+
+The workflow downloads gitleaks from its release and checks a pinned SHA-256,
+rather than using `gitleaks-action`, which needs a paid license for
+organization-owned repos. To bump the version, change `rev:` in
+`tools/secrets/pre-commit-config.yaml` and both `GITLEAKS_*` values in
+`tools/secrets/secret-scan.yml`, taking the hash from the release's
+`checksums.txt`.
 
 Lands in `<project>/openspec/schemas/casadei/`, **and selects it** in the
 project's `openspec/config.yaml`. What it reports depends on what it finds:
@@ -376,7 +426,8 @@ visually separable from upstream's.
 **`proposal`** — ask instead of inventing when requirements are underspecified;
 semver and a mandatory deprecation path for every `**BREAKING**`; new
 dependencies named in Impact and approved before design; Impact must call out
-personal data, DB schema, queues, and public API surface.
+personal data, DB schema, queues, public API surface, and new secrets (by name,
+never by value); no real secrets or personal data in any artifact.
 
 **`specs`** — the BDD format above; idempotency contracts for state-mutating
 endpoints and workers; retry ceilings and DLQ routing for consumers; LGPD data
@@ -388,15 +439,17 @@ explicit warning that the validator checks the requirement *body* for
 **`design`** — YAGNI, with any abstraction required to name the concrete second
 use case justifying it; grounding in existing project conventions; dependency
 rationale; expand-and-contract migrations with a functional `down` for every
-step; feature flags with a stated removal criterion; where secrets load from and
-how PII is redacted.
+step; feature flags with a stated removal criterion; where secrets load from
+(each new secret and its store per environment) and how PII is redacted.
 
 **`tasks`** — test and `/docs/` tasks live inside the group whose work they
 cover, so each group is built, tested and documented before the next builds on
 it (upstream's rule, made concrete); at least one automated test per feature or
 fix, mapped onto the spec's scenarios; per-step migration tasks plus rollback
-verification; `/docs/` updated in the same commit; a closing quality-gate group
-naming the project's real commands, including the coverage threshold.
+verification; `/docs/` updated in the same commit; `.env.example`, gitignore
+and secret-store tasks for every new secret; a closing quality-gate group
+naming the project's real commands, including the coverage threshold and the
+secret scanner when one is configured.
 
 **`apply`** — human authorship with no AI trailers; never commit to `main`
 unasked; JIRA or GitHub Issues/Projects (ask if it's not already obvious) —
@@ -406,7 +459,9 @@ create a story issue plus one sub-issue per task group via `gh issue create
 `<type>/<issue-number>-<kebab-case-title>`, and move each issue's board
 Status as tasks start and finish; Conventional Commits and linear history;
 minimal diff; idiomatic code matching existing patterns; standardized
-docblocks; no hardcoded secrets; `/docs/` in PT-BR; ask when ambiguous;
+docblocks; no hardcoded secrets, a `git diff --staged` check before every
+commit, no `git add -A`, no bypassing the secret scanner, and stop-and-rotate
+for a committed secret; `/docs/` in PT-BR; ask when ambiguous;
 verify build, lint, types before declaring the branch ready.
 
 ## What's deliberately unchanged
@@ -465,7 +520,7 @@ change.
 | **§3 Resilience & migrations** | `specs.instruction` (contract) and `design.instruction` (mechanism), tasks in `tasks.instruction` |
 | **§4 Documentation (`/docs/`, PT-BR)** | `tasks.instruction` and `apply.instruction` |
 | **§5 Testing & BDD scenarios** | BDD format in `specs.instruction`; test and coverage tasks in `tasks.instruction` |
-| **§6 Security, LGPD & observability** | `specs.instruction` (contract) and `design.instruction` (technical choice) |
+| **§6 Security, LGPD & observability** | `specs.instruction` (contract) and `design.instruction` (technical choice); keeping secrets out of git in every instruction, most of it in `apply.instruction`. Enforcement comes from `install --project --secrets` ([Secret protection](#secret-protection)), plus `openspec/secrets-policy.md` at `high` |
 | **§7 AI guardrails** | `proposal.instruction` and `apply.instruction` |
 
 ## The one deliberate duplication
