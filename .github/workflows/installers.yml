@@ -103,9 +103,13 @@ jobs:
           $OPENSPEC --version
           project="$(mktemp -d)"
           (cd "$project" && $OPENSPEC init --tools none < /dev/null)
-          ./tools/install.sh --project "$project" --claude
+          ./tools/install.sh --project "$project" --claude --secrets high
           cd "$project"
           grep -qx 'schema: casadei' openspec/config.yaml
+          grep -qx '# BEGIN openspec-casadei: secrets' .gitignore
+          test -f .pre-commit-config.yaml
+          test -f .github/workflows/secret-scan.yml
+          test -f openspec/secrets-policy.md
           $OPENSPEC schema which casadei | tee which.txt
           grep -q 'Source: project' which.txt
           $OPENSPEC schema validate casadei

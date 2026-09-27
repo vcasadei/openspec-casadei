@@ -8,12 +8,19 @@
     applies to every session rather than only to an /opsx:apply run.
     -Project -Claude also writes the authorship rule into <project>\CLAUDE.md,
     so it is committed with the repo.
+    -Project -Secrets medium also sets up secret protection: .gitignore rules,
+    a gitleaks pre-commit hook, and a GitHub Actions secret scan. -Secrets high
+    adds openspec/secrets-policy.md on top. The schema's own secret rules apply
+    at every level.
 
 .EXAMPLE
     .\tools\install.ps1 -Project C:\path\to\repo   # project-local (priority 1)
 
 .EXAMPLE
     .\tools\install.ps1 -Project C:\path\to\repo -Claude   # + <project>\CLAUDE.md
+
+.EXAMPLE
+    .\tools\install.ps1 -Project C:\path\to\repo -Secrets high   # + secret protection
 
 .EXAMPLE
     .\tools\install.ps1 -User                      # per-machine    (priority 2)
@@ -36,7 +43,11 @@ param(
     [string]$Project,
 
     [Parameter(ParameterSetName = 'Project')]
-    [switch]$Claude
+    [switch]$Claude,
+
+    [Parameter(ParameterSetName = 'Project')]
+    [ValidateSet('medium', 'high')]
+    [string]$Secrets
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,6 +58,9 @@ $SourceDir  = Join-Path $RepoRoot "schemas\$SchemaName"
 $BlockBegin = '<!-- BEGIN openspec-casadei: authorship -->'
 $BlockEnd   = '<!-- END openspec-casadei: authorship -->'
 $RuleFile   = Join-Path $RepoRoot 'tools\authorship.md'
+$SecretsDir   = Join-Path $RepoRoot 'tools\secrets'
+$SecretsBegin = '# BEGIN openspec-casadei: secrets'
+$SecretsEnd   = '# END openspec-casadei: secrets'
 
 if (-not (Test-Path $SourceDir)) {
     throw "Schema not found at $SourceDir"
@@ -114,54 +128,162 @@ function Set-ProjectSchema([string]$Root) {
     Write-Host "   Set 'schema: $SchemaName' in openspec/config.yaml (was 'spec-driven')."
 }
 
-# Install the authorship rule into a CLAUDE.md.
+# Write a delimited block into a file, idempotently: create the file if it is
+# missing, append the block if the file has none, otherwise rewrite only what
+# is between the markers. Everything outside the block is left untouched.
 #
-# It lives here rather than only in the schema's apply instruction because the
-# apply instruction is only in context during an /opsx:apply run - a plain
-# "commit this" would never see it. Written inside a delimited block so the
-# file can be re-written idempotently without touching anything else in it.
-#
-#   $File - ~/.claude/CLAUDE.md (-User) or <project>\CLAUDE.md (-Project -Claude)
-function Install-ClaudeMd([string]$File) {
+#   $File  - target file
+#   $Begin - opening marker line
+#   $End   - closing marker line
+#   $Body  - block body
+#   $What  - what the block is, for messages ("the authorship rule")
+function Install-Block([string]$File, [string]$Begin, [string]$End, [string]$Body, [string]$What) {
     $dir = Split-Path -Parent $File
-
-    # Single source shared with install.sh, so the two installers cannot drift.
-    if (-not (Test-Path $RuleFile)) {
-        throw "Authorship rule not found at $RuleFile"
-    }
-    $body = ((Get-Content $RuleFile -Raw) -replace '\s+$', '')
-
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
-    if (-not (Test-Path $file)) {
+    if (-not (Test-Path $File)) {
         # Written line by line, exactly as a refresh writes it, so re-running
-        # never rewrites the line endings of a committed CLAUDE.md.
-        @($BlockBegin) + @($body -split "`r?`n") + @($BlockEnd) | Set-Content $file -Encoding utf8
-        Write-Host "   Created $file with the authorship rule."
+        # never rewrites the line endings of a committed file.
+        @($Begin) + @($Body -split "`r?`n") + @($End) | Set-Content $File -Encoding utf8
+        Write-Host "   Created $File with $What."
         return
     }
 
-    $lines = @(Get-Content $file)
-    $b = [Array]::FindIndex($lines, [Predicate[string]] { $args[0] -eq $BlockBegin })
-    $e = [Array]::FindIndex($lines, [Predicate[string]] { $args[0] -eq $BlockEnd })
+    $lines = @(Get-Content $File)
+    $b = [Array]::FindIndex($lines, [Predicate[string]] { $args[0] -eq $Begin })
+    $e = [Array]::FindIndex($lines, [Predicate[string]] { $args[0] -eq $End })
 
     if ($b -ge 0) {
         if ($e -gt $b) {
             $head = if ($b -gt 0) { $lines[0..($b - 1)] } else { @() }
             $tail = if ($e -lt ($lines.Count - 1)) { $lines[($e + 1)..($lines.Count - 1)] } else { @() }
-            $out = @($head) + @($BlockBegin) + @($body -split "`r?`n") + @($BlockEnd) + @($tail)
-            $out | Set-Content $file -Encoding utf8
-            Write-Host "   Refreshed the authorship rule in $file."
+            $out = @($head) + @($Begin) + @($Body -split "`r?`n") + @($End) + @($tail)
+            $out | Set-Content $File -Encoding utf8
+            Write-Host "   Refreshed $What in $File."
         } else {
-            Write-Host "!  $file has an opening marker but no closing one - left unchanged."
+            Write-Host "!  $File has an opening marker but no closing one - left unchanged."
             Write-Host "   Repair it by hand, then re-run."
         }
         return
     }
 
-    $append = @('') + @($BlockBegin) + @($body -split "`r?`n") + @($BlockEnd)
-    $append | Add-Content $file -Encoding utf8
-    Write-Host "   Appended the authorship rule to $file (existing content kept)."
+    $append = @('') + @($Begin) + @($Body -split "`r?`n") + @($End)
+    $append | Add-Content $File -Encoding utf8
+    Write-Host "   Appended $What to $File (existing content kept)."
+}
+
+# A shared source file's content, without trailing whitespace.
+function Get-SourceBody([string]$Path) {
+    return ((Get-Content $Path -Raw) -replace '\s+$', '')
+}
+
+# Install the authorship rule into a CLAUDE.md.
+#
+# It lives here rather than only in the schema's apply instruction because the
+# apply instruction is only in context during an /opsx:apply run - a plain
+# "commit this" would never see it.
+#
+#   $File - ~/.claude/CLAUDE.md (-User) or <project>\CLAUDE.md (-Project -Claude)
+function Install-ClaudeMd([string]$File) {
+    # Single source shared with install.sh, so the two installers cannot drift.
+    if (-not (Test-Path $RuleFile)) {
+        throw "Authorship rule not found at $RuleFile"
+    }
+    Install-Block $File $BlockBegin $BlockEnd (Get-SourceBody $RuleFile) 'the authorship rule'
+}
+
+# Copy a file into the project unless one is already there. An existing file
+# is never overwritten: the project may have edited it, and a policy or
+# workflow it has made its own is not ours to replace.
+#
+#   $Src  - source file under tools\secrets\
+#   $Dest - destination
+#   $What - what the file is, for messages
+function Install-File([string]$Src, [string]$Dest, [string]$What) {
+    if (-not (Test-Path $Dest)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Dest) | Out-Null
+        Copy-Item $Src $Dest
+        Write-Host "   Created $Dest ($What)."
+    } elseif ((Get-FileHash $Src).Hash -eq (Get-FileHash $Dest).Hash) {
+        Write-Host "   $Dest is already up to date."
+    } else {
+        Write-Host "!  $Dest already exists and differs from this repo's copy - left unchanged."
+        Write-Host "   Compare it with $Src by hand."
+    }
+}
+
+# Committed files that the project's ignore rules now match, or none when the
+# project is not a git work tree (or git is not installed).
+function Get-TrackedIgnoredFiles([string]$Root) {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return @() }
+    # Windows PowerShell 5.1 turns a native command's stderr into a terminating
+    # error under 'Stop', so git's "not a git repository" must not reach it.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & git -C $Root rev-parse --is-inside-work-tree 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { return @() }
+        return @(& git -C $Root ls-files -ci --exclude-standard 2>$null | Where-Object { $_ })
+    } finally {
+        $ErrorActionPreference = $prev
+        $global:LASTEXITCODE = 0
+    }
+}
+
+# Set up secret protection in a project. The schema's rules already apply;
+# these add the tooling that enforces them.
+#
+#   $Root  - project root
+#   $Level - medium or high
+function Install-Secrets([string]$Root, [string]$Level) {
+    $precommit = Join-Path $Root '.pre-commit-config.yaml'
+    $precommitSrc = Join-Path $SecretsDir 'pre-commit-config.yaml'
+
+    Write-Host ""
+    Write-Host "Secret protection ($Level):"
+
+    Install-Block (Join-Path $Root '.gitignore') $SecretsBegin $SecretsEnd `
+        (Get-SourceBody (Join-Path $SecretsDir 'gitignore')) 'the secret ignore rules'
+
+    if (-not (Test-Path $precommit)) {
+        Copy-Item $precommitSrc $precommit
+        Write-Host "   Created $precommit (gitleaks pre-commit hook)."
+    } elseif (Select-String -Path $precommit -Pattern 'gitleaks' -SimpleMatch -Quiet) {
+        Write-Host "   $precommit already runs gitleaks."
+    } else {
+        Write-Host "!  $precommit exists without a gitleaks hook - left unchanged."
+        Write-Host "   Add the 'repos:' entry from $precommitSrc by hand."
+    }
+
+    Install-File (Join-Path $SecretsDir 'secret-scan.yml') `
+        (Join-Path $Root '.github\workflows\secret-scan.yml') 'GitHub Actions secret scan'
+
+    if ($Level -eq 'high') {
+        Install-File (Join-Path $SecretsDir 'secrets-policy.md') `
+            (Join-Path $Root 'openspec\secrets-policy.md') "secrets policy - fill in its 'Where secrets live' table"
+    }
+
+    # The ignore rules do nothing for a file that is already committed.
+    $tracked = @(Get-TrackedIgnoredFiles $Root)
+    if ($tracked.Count -gt 0) {
+        Write-Host "!  These committed files match the secret ignore rules and are still tracked:"
+        $tracked | ForEach-Object { Write-Host "     $_" }
+        Write-Host "   If one holds a real secret, rotate it first - it is in git history."
+        Write-Host "   Then untrack it with: git rm --cached <file>"
+    }
+
+    Write-Host ""
+    Write-Host "   Next steps:"
+    Write-Host "   1. In every clone: pre-commit install"
+    Write-Host "   2. Turn on GitHub secret scanning and push protection (repo admin;"
+    Write-Host "      private repos need GitHub Advanced Security) under Settings >"
+    Write-Host "      Code security, or:"
+    Write-Host "        gh api -X PATCH repos/<owner>/<repo> ``"
+    Write-Host "          -f 'security_and_analysis[secret_scanning][status]=enabled' ``"
+    Write-Host "          -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled'"
+    if ($Level -eq 'high') {
+        Write-Host "   3. Fill in the 'Where secrets live' table in openspec/secrets-policy.md."
+    }
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'User') {
@@ -210,6 +332,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Project') {
     Set-ProjectSchema $projectRoot
     if ($Claude) {
         Install-ClaudeMd (Join-Path $projectRoot 'CLAUDE.md')
+    }
+    if ($Secrets) {
+        Install-Secrets $projectRoot $Secrets
     }
     Write-Host ""
     Write-Host "Verify with: openspec schema which $SchemaName"
