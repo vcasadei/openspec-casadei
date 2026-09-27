@@ -23,7 +23,8 @@
 ## Security & Observability
 
 <!-- Delete if the change touches none of these.
-     - Where secrets load from (env vars or vault; never hardcoded).
+     - Where secrets load from (env vars or vault; never hardcoded). Name each
+       new secret and its store per environment - never its value.
      - How personal data is masked or redacted before logs/metrics/telemetry.
      - How correlation IDs and OpenTelemetry headers propagate across service
        and queue boundaries. -->
