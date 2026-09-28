@@ -235,6 +235,42 @@ function Test-RefusesADirtyTree {
 Write-Host "tools/sync-upstream.ps1 (via $Shell)"
 # Only functions defined in this file - Get-Command alone would also pick up
 # every Test-* function from installed modules (the Az modules on CI runners).
+# --- upstream version in the README -----------------------------------------
+
+# Give the fork the version script, its template, and a README with markers.
+function Add-VersionScript {
+    $f = $script:Fork
+    Copy-Item (Join-Path $RepoRoot 'tools\upstream-version.ps1') "$f\tools\upstream-version.ps1"
+    Copy-Item (Join-Path $RepoRoot 'tools\readme-header.md') "$f\tools\readme-header.md"
+    Write-File "$f\README.md" ("fork readme`n" +
+        "<!-- BEGIN upstream-version: generated from tools/readme-header.md, do not edit -->`n" +
+        "<!-- END upstream-version -->`n")
+    Invoke-Git $f add -A | Out-Null
+    Invoke-Git $f commit -q -m 'fork: version script' | Out-Null
+}
+
+function Test-RecordsTheUpstreamVersionInTheMergeCommit {
+    Add-VersionScript
+    New-UpstreamCommit 'release 1.14.0' { Write-File (Join-Path $script:Upstream 'package.json') "{`n  `"version`": `"1.14.0`"`n}`n" }
+    Invoke-Sync
+    Assert-Eq $script:status 0 'exit status'
+    Assert-Output 'README.md now says v1.14.0'
+    $committed = (Invoke-Git $script:Fork show HEAD:README.md) -join "`n"
+    if (-not $committed.Contains('to **v1.14.0**')) { Fail "merge commit's README.md lacks v1.14.0" }
+    Assert-Eq (@((Invoke-Git $script:Fork log -1 --format=%p HEAD) -split ' ').Count) 2 'merge commit parents'
+    Assert-Eq "$(Invoke-Git $script:Fork status --porcelain)" '' 'working tree after sync'
+    Assert-Absent 'package.json'
+}
+
+function Test-MergesEvenWhenTheVersionCannotBeRead {
+    Add-VersionScript
+    New-UpstreamCommit 'doc' { Add-Content -Path (Join-Path $script:Upstream 'docs\guide.md') -Value '1' }
+    Invoke-Sync
+    Assert-Eq $script:status 0 'exit status'
+    Assert-Output 'README.md not updated'
+    Assert-Eq (@((Invoke-Git $script:Fork log -1 --format=%p HEAD) -split ' ').Count) 2 'merge commit parents'
+}
+
 $tests = Get-Command -CommandType Function -Name 'Test-*' |
     Where-Object { $_.ScriptBlock.File -eq $PSCommandPath } |
     Sort-Object Name

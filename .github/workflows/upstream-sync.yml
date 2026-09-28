@@ -177,6 +177,7 @@ jobs:
         run: |
           ./tools/tests/install.test.sh
           ./tools/tests/sync-upstream.test.sh
+          ./tools/tests/upstream-version.test.sh
 
       - name: Open the sync PR
         id: pr

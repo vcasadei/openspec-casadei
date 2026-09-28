@@ -111,6 +111,25 @@ if ($remaining.Count -gt 0) {
     exit 1
 }
 
+# Record which upstream release the fork is now synced to, in the README
+# header, as part of the merge commit itself. A failure here doesn't stop the
+# merge; CI's --check then flags the stale header on the sync PR.
+if (Test-Path 'tools\upstream-version.ps1') {
+    $ok = $false
+    try {
+        & .\tools\upstream-version.ps1 upstream/main
+        $ok = ($LASTEXITCODE -eq 0)
+    } catch {
+        Write-Host "   $_"
+    }
+    if ($ok) {
+        git add README.md
+    } else {
+        Write-Host '!  README.md not updated; run .\tools\upstream-version.ps1 upstream/main by hand.'
+    }
+    $global:LASTEXITCODE = 0
+}
+
 # Commit even when nothing tracked changed: recording the merge is what moves
 # the merge base forward, so the next sync starts from here.
 git commit -q --no-edit

@@ -227,6 +227,38 @@ test_refuses_a_dirty_tree() {
   assert_output "working tree is dirty"
 }
 
+# --- upstream version in the README ----------------------------------------
+
+# Give the fork the version script, its template, and a README with markers.
+add_version_script() {
+  cp "$REPO_ROOT/tools/upstream-version.sh" "$REPO_ROOT/tools/readme-header.md" "$FORK/tools/"
+  printf 'fork readme\n%s\n%s\n' \
+    "<!-- BEGIN upstream-version: generated from tools/readme-header.md, do not edit -->" \
+    "<!-- END upstream-version -->" > "$FORK/README.md"
+  git -C "$FORK" add -A && git -C "$FORK" commit -q -m "fork: version script"
+}
+
+test_records_the_upstream_version_in_the_merge_commit() {
+  add_version_script
+  upstream_commit "release 1.14.0" sh -c 'printf "{\n  \"version\": \"1.14.0\"\n}\n" > package.json'
+  run_sync
+  assert_eq "$status" "0" "exit status"
+  assert_output "README.md now says v1.14.0"
+  git -C "$FORK" show HEAD:README.md | grep -qF 'to **v1.14.0**' || fail "merge commit's README.md lacks v1.14.0"
+  assert_eq "$(git -C "$FORK" log -1 --format=%p HEAD | wc -w | tr -d ' ')" "2" "merge commit parents"
+  assert_eq "$(git -C "$FORK" status --porcelain)" "" "working tree after sync"
+  assert_absent package.json
+}
+
+test_merges_even_when_the_version_cannot_be_read() {
+  add_version_script
+  upstream_commit "doc" sh -c 'echo 1 >> docs/guide.md'
+  run_sync
+  assert_eq "$status" "0" "exit status"
+  assert_output "README.md not updated"
+  assert_eq "$(git -C "$FORK" log -1 --format=%p HEAD | wc -w | tr -d ' ')" "2" "merge commit parents"
+}
+
 echo "tools/sync-upstream.sh"
 for t in $(declare -F | awk '{print $3}' | grep '^test_'); do
   run_case "$t"

@@ -108,6 +108,17 @@ if [ -n "$remaining" ]; then
   exit 1
 fi
 
+# Record which upstream release the fork is now synced to, in the README
+# header, as part of the merge commit itself. A failure here doesn't stop the
+# merge; CI's --check then flags the stale header on the sync PR.
+if [ -x tools/upstream-version.sh ]; then
+  if ./tools/upstream-version.sh upstream/main; then
+    git add README.md
+  else
+    echo "!  README.md not updated; run ./tools/upstream-version.sh upstream/main by hand."
+  fi
+fi
+
 # Commit even when nothing tracked changed: recording the merge is what moves
 # the merge base forward, so the next sync starts from here.
 git commit -q --no-edit
