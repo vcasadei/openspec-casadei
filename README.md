@@ -1,9 +1,14 @@
 # OpenSpec, my way
 
+<!-- BEGIN upstream-version: generated from tools/readme-header.md, do not edit -->
 [![CI](https://github.com/vcasadei/openspec-casadei/actions/workflows/installers.yml/badge.svg?branch=main)](https://github.com/vcasadei/openspec-casadei/actions/workflows/installers.yml)
+[![Synced to OpenSpec](https://img.shields.io/badge/synced_to_OpenSpec-v1.13.2-blue)](https://github.com/Fission-AI/OpenSpec/commit/79b6aa9c98f1e36795b2bc4ef2a8f770c6d3a777)
 
-My personal fork of [OpenSpec](https://github.com/Fission-AI/OpenSpec) v1.13.0,
-set up the way I like to work.
+My personal fork of [OpenSpec](https://github.com/Fission-AI/OpenSpec), synced
+to **v1.13.2** (upstream commit
+[`79b6aa9`](https://github.com/Fission-AI/OpenSpec/commit/79b6aa9c98f1e36795b2bc4ef2a8f770c6d3a777)), set up
+the way I like to work.
+<!-- END upstream-version -->
 
 The whole point of this repo is [`schemas/casadei/`](schemas/casadei/) — the
 templates and instructions that decide how proposals, specs, designs, and task
@@ -604,10 +609,12 @@ The sync scripts have them too, built on throwaway local repos:
 
 ```bash
 ./tools/tests/sync-upstream.test.sh                           # sync-upstream.sh
+./tools/tests/upstream-version.test.sh                        # upstream-version.sh
 ```
 
 ```powershell
 .\tools\tests\sync-upstream.tests.ps1 -Shell pwsh            # sync-upstream.ps1
+.\tools\tests\upstream-version.tests.ps1 -Shell pwsh         # upstream-version.ps1
 ```
 
 [`.github/workflows/installers.yml`](.github/workflows/installers.yml) runs on
@@ -616,10 +623,10 @@ every pull request, every push to `main`, and weekly:
 | Job | Checks |
 |---|---|
 | ShellCheck | Every `.sh` in `tools/` |
-| bash scripts | `install.sh` and `sync-upstream.sh` tests, Linux and macOS |
-| PowerShell scripts | `install.ps1` and `sync-upstream.ps1` tests, Windows, PowerShell 7 and 5.1 |
+| bash scripts | `install.sh`, `sync-upstream.sh` and `upstream-version.sh` tests, Linux and macOS |
+| PowerShell scripts | `install.ps1`, `sync-upstream.ps1` and `upstream-version.ps1` tests, Windows, PowerShell 7 and 5.1 |
 | Schema validates (npm CLI) | `openspec schema validate casadei` with the latest release from npm, in a fresh `openspec init` project |
-| Schema validates (upstream CLI) | The same, with the CLI built from the newest upstream commit merged into this fork |
+| Schema validates (upstream CLI) | The same, with the CLI built from the newest upstream commit merged into this fork, plus the README header naming that same commit ([Which upstream version](#which-upstream-version-this-fork-is-on)) |
 
 ### Per-project tweaks that don't need a schema change
 
@@ -715,7 +722,7 @@ It fetches and merges `upstream/main`, treating each path by what it is:
 | **Upstream-only** — the CLI source, tests, website, everything else | Kept out, whether upstream modifies or re-adds them |
 
 Put differently: outside the tracked paths, a sync never changes the fork's
-tree. To start following a new upstream path, add it to `TRACKED_PREFIXES` in
+tree, with one exception: the README header. To start following a new upstream path, add it to `TRACKED_PREFIXES` in
 both `sync-upstream.sh` and `sync-upstream.ps1`.
 
 What it leaves for you is the part that needs judgment: changes to
@@ -727,6 +734,28 @@ diff -ru schemas/spec-driven/ schemas/casadei/
 
 Keeping `schemas/spec-driven/` untouched is what makes that diff meaningful — it
 is the control my changes are measured against.
+
+## Which upstream version this fork is on
+
+The badge and the first sentence of this README say which upstream release and
+commit the fork is synced to. They are generated, never typed:
+
+| Piece | Role |
+|---|---|
+| [`tools/readme-header.md`](tools/readme-header.md) | The header template: the CI badge, the "synced to OpenSpec" badge, and the intro sentence. **Edit this, not the README** |
+| `tools/upstream-version.sh` / `.ps1` | Fills in the template from `package.json` at a given upstream commit and writes it between the `upstream-version` markers in `README.md` |
+| `tools/sync-upstream.sh` / `.ps1` | Runs it during every merge, so the new version lands in the merge commit itself |
+| [CI](#tests-and-ci) | `upstream-version.sh --check` against the upstream commit the fork has merged. It fails if the header is stale or was edited by hand |
+
+The version is upstream's `package.json` `version` at the merged commit. Upstream
+bumps it when it releases, so it names the release the fork contains; the commit
+link shows exactly how far past that release the fork is.
+
+To fix a stale header by hand, for example after resolving a sync conflict:
+
+```bash
+./tools/upstream-version.sh "$(git merge-base HEAD upstream/main)"
+```
 
 ---
 
