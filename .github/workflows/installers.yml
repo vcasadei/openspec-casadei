@@ -28,7 +28,7 @@ jobs:
     name: ShellCheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: shellcheck tools/*.sh tools/tests/*.sh
 
   bash:
@@ -39,7 +39,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ./tools/tests/install.test.sh
       - run: ./tools/tests/sync-upstream.test.sh
 
@@ -51,7 +51,7 @@ jobs:
         shell: [pwsh, powershell]
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - shell: pwsh
         run: ./tools/tests/install.tests.ps1 -Shell ${{ matrix.shell }}
       - shell: pwsh
@@ -71,11 +71,11 @@ jobs:
       OPENSPEC_TELEMETRY: '0'
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The upstream build needs history to find the merged upstream commit.
           fetch-depth: ${{ matrix.cli == 'upstream' && '0' || '1' }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
