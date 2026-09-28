@@ -51,14 +51,22 @@ function Invoke-Git([string]$Dir) {
     return $result
 }
 
+# Cases write paths Windows-style ('docs\guide.md'). PowerShell's cmdlets accept
+# that on every OS, but the .NET file APIs below don't: on Linux and macOS a
+# backslash is part of the file name, so convert it to the host's separator.
+function ConvertTo-HostPath([string]$Path) {
+    return $Path.Replace('\', [IO.Path]::DirectorySeparatorChar)
+}
+
 # LF-only writes, so content checks don't depend on the host's newline.
 function Write-File([string]$Path, [string]$Text) {
+    $Path = ConvertTo-HostPath $Path
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
     [IO.File]::WriteAllText($Path, $Text)
 }
 
 function Read-Fork([string]$Rel) {
-    return ([IO.File]::ReadAllText((Join-Path $script:Fork $Rel)) -replace "`r", '').TrimEnd("`n")
+    return ([IO.File]::ReadAllText((ConvertTo-HostPath (Join-Path $script:Fork $Rel))) -replace "`r", '').TrimEnd("`n")
 }
 
 function Initialize-Repo([string]$Dir) {

@@ -624,7 +624,7 @@ every pull request, every push to `main`, and weekly:
 |---|---|
 | ShellCheck | Every `.sh` in `tools/` |
 | bash scripts | `install.sh`, `sync-upstream.sh` and `upstream-version.sh` tests, Linux and macOS |
-| PowerShell scripts | `install.ps1`, `sync-upstream.ps1` and `upstream-version.ps1` tests, Windows, PowerShell 7 and 5.1 |
+| PowerShell scripts | `install.ps1`, `sync-upstream.ps1` and `upstream-version.ps1` tests: Windows under PowerShell 7 and 5.1, and Linux under PowerShell 7 |
 | Schema validates (npm CLI) | `openspec schema validate casadei` with the latest release from npm, in a fresh `openspec init` project |
 | Schema validates (upstream CLI) | The same, with the CLI built from the newest upstream commit merged into this fork, plus the README header naming that same commit ([Which upstream version](#which-upstream-version-this-fork-is-on)) |
 

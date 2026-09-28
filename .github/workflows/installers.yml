@@ -45,12 +45,17 @@ jobs:
       - run: ./tools/tests/upstream-version.test.sh
 
   powershell:
-    name: PowerShell scripts (${{ matrix.shell }})
+    name: PowerShell scripts (${{ matrix.shell }}, ${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        shell: [pwsh, powershell]
-    runs-on: windows-latest
+        # Windows PowerShell 5.1 exists only on Windows. PowerShell 7 also runs
+        # on Linux, which catches Windows-only path handling in the tests.
+        include:
+          - { os: windows-latest, shell: pwsh }
+          - { os: windows-latest, shell: powershell }
+          - { os: ubuntu-24.04, shell: pwsh }
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - shell: pwsh
