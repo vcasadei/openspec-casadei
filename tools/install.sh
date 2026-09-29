@@ -11,7 +11,8 @@
 # Options:
 #   --no-claude-md   (with --user) skip writing ~/.claude/CLAUDE.md
 #   --claude         (with --project) also write the authorship rule into
-#                    <project>/CLAUDE.md, so it is committed with the repo
+#                    <project>/CLAUDE.md. Warns if that path is git-ignored,
+#                    which keeps the rule local to your working copy
 #   --secrets LEVEL  (with --project) also set up secret protection:
 #                      medium - .gitignore rules, a gitleaks pre-commit hook,
 #                               and a GitHub Actions secret scan
@@ -151,6 +152,28 @@ install_claude_md() {
     return 1
   fi
   install_block "$1" "$BLOCK_BEGIN" "$BLOCK_END" "$(cat "$RULE_FILE")" "the authorship rule"
+}
+
+# Say so when a CLAUDE.md we just wrote is ignored by that project's git setup.
+#
+# --claude exists so the rule can travel with the repo. Upstream OpenSpec's
+# .gitignore lists CLAUDE.md, and every project the fork touches inherits it,
+# so the common case is that the file is written, reported, and then quietly
+# skipped by `git add`. Keeping it local is a fine choice - this only makes it
+# a visible one.
+#
+#   $1 - the file just written
+#   $2 - the project root to ask git from
+warn_if_gitignored() {
+  local file="$1" root="$2" rule
+  command -v git >/dev/null 2>&1 || return 0
+  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  git -C "$root" check-ignore -q "$file" 2>/dev/null || return 0
+  rule="$(git -C "$root" check-ignore -v "$file" 2>/dev/null | cut -f1)"
+  echo "!  $file is git-ignored${rule:+ (by $rule)}, so it will NOT be committed."
+  echo "   The rule still applies in this working copy, but a fresh clone will"
+  echo "   not carry it. To commit it anyway, add an exception to .gitignore:"
+  echo "       echo '!CLAUDE.md' >> \"$root/.gitignore\""
 }
 
 # Copy a file into the project unless one is already there. An existing file
@@ -297,6 +320,7 @@ if [ "$mode" = "project" ]; then
   set_project_schema "$project_root"
   if [ "$project_claude_md" -eq 1 ]; then
     install_claude_md "$project_root/CLAUDE.md"
+    warn_if_gitignored "$project_root/CLAUDE.md" "$project_root"
   fi
   if [ -n "$secrets_level" ]; then
     install_secrets "$project_root" "$secrets_level"

@@ -126,6 +126,35 @@ function Test-ProjectClaudeCreatesClaudeMd {
     Assert-NoFile (Join-Path $script:Sandbox 'home\.claude\CLAUDE.md')
 }
 
+# -Claude is for getting the rule committed with the repo, so when the path it
+# wrote is git-ignored the installer has to say so rather than report success.
+function Test-ProjectClaudeWarnsWhenGitIgnored {
+    $p = New-Project 'pgitignored'
+    git -C $p init -q
+    'CLAUDE.md' | Set-Content (Join-Path $p '.gitignore')
+    Invoke-Install -Project $p -Claude
+    Assert-Eq $script:status 0 'exit status'
+    Assert-File (Join-Path $p 'CLAUDE.md')
+    Assert-Match $script:out 'is git-ignored'
+}
+
+function Test-ProjectClaudeQuietWhenNotGitIgnored {
+    $p = New-Project 'pgitok'
+    git -C $p init -q
+    'node_modules/' | Set-Content (Join-Path $p '.gitignore')
+    Invoke-Install -Project $p -Claude
+    Assert-Eq $script:status 0 'exit status'
+    if ($script:out -match 'is git-ignored') { Fail "unexpected git-ignored warning: $script:out" }
+}
+
+function Test-ProjectClaudeQuietOutsideAGitRepo {
+    $p = New-Project 'pnogit'
+    Invoke-Install -Project $p -Claude
+    Assert-Eq $script:status 0 'exit status'
+    Assert-File (Join-Path $p 'CLAUDE.md')
+    if ($script:out -match 'is git-ignored') { Fail "unexpected git-ignored warning: $script:out" }
+}
+
 function Test-ProjectClaudeIsIdempotent {
     $p = New-Project 'p'
     $file = Join-Path $p 'CLAUDE.md'

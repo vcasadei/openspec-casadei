@@ -6,7 +6,8 @@
     -Project also selects the schema in that project's openspec/config.yaml.
     -User also installs the authorship rule into ~/.claude/CLAUDE.md, so it
     applies to every session rather than only to an /opsx:apply run.
-    -Project -Claude also writes the authorship rule into <project>\CLAUDE.md,
+    -Project -Claude also writes the authorship rule into <project>\CLAUDE.md
+    (warning if that path is git-ignored, which keeps the rule local),
     so it is committed with the repo.
     -Project -Secrets medium also sets up secret protection: .gitignore rules,
     a gitleaks pre-commit hook, and a GitHub Actions secret scan. -Secrets high
@@ -328,10 +329,52 @@ Copy-Item -Recurse $SourceDir $dest
 
 Write-Host "Installed schema '$SchemaName' -> $dest"
 
+# Say so when a CLAUDE.md we just wrote is ignored by that project's git setup.
+#
+# -Claude exists so the rule can travel with the repo. Upstream OpenSpec's
+# .gitignore lists CLAUDE.md, and every project the fork touches inherits it,
+# so the common case is that the file is written, reported, and then quietly
+# skipped by `git add`. Keeping it local is a fine choice - this only makes it
+# a visible one.
+function Warn-IfGitIgnored([string]$File, [string]$Root) {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return }
+
+    # Continue, not Stop, around the git calls: Windows PowerShell 5.1 turns
+    # redirected native stderr into a terminating error under 'Stop', and git
+    # writes to stderr whenever $Root is not a repository - which is exactly
+    # the case this function exists to survive quietly.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $rule = $null
+    $ignored = $false
+    try {
+        git -C $Root rev-parse --git-dir *>$null
+        if ($LASTEXITCODE -eq 0) {
+            git -C $Root check-ignore -q $File *>$null
+            if ($LASTEXITCODE -eq 0) {
+                $ignored = $true
+                $rule = (git -C $Root check-ignore -v $File 2>$null) -split "`t" | Select-Object -First 1
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $prev
+        $global:LASTEXITCODE = 0
+    }
+
+    if (-not $ignored) { return }
+
+    $by = if ($rule) { " (by $rule)" } else { "" }
+    Write-Host "!  $File is git-ignored$by, so it will NOT be committed."
+    Write-Host "   The rule still applies in this working copy, but a fresh clone will"
+    Write-Host "   not carry it. To commit it anyway, add an exception to .gitignore:"
+    Write-Host "       '!CLAUDE.md' >> `"$Root\.gitignore`""
+}
+
 if ($PSCmdlet.ParameterSetName -eq 'Project') {
     Set-ProjectSchema $projectRoot
     if ($Claude) {
         Install-ClaudeMd (Join-Path $projectRoot 'CLAUDE.md')
+        Warn-IfGitIgnored (Join-Path $projectRoot 'CLAUDE.md') $projectRoot
     }
     if ($Secrets) {
         Install-Secrets $projectRoot $Secrets
