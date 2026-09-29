@@ -105,6 +105,44 @@ test_project_claude_creates_claude_md() {
   assert_no_file "$SANDBOX/home/.claude/CLAUDE.md"
 }
 
+# --claude is for getting the rule committed with the repo, so when the path it
+# wrote is git-ignored the installer has to say so rather than report success.
+test_project_claude_warns_when_gitignored() {
+  local p; p="$(new_project pgitignored)"
+  git -C "$p" init -q
+  printf 'CLAUDE.md
+' > "$p/.gitignore"
+  run_install --project "$p" --claude
+  assert_eq "$status" "0" "exit status"
+  assert_file "$p/CLAUDE.md"
+  case "$out" in
+    *"is git-ignored"*) ;;
+    *) fail "expected a git-ignored warning, got: $out" ;;
+  esac
+}
+
+test_project_claude_quiet_when_not_gitignored() {
+  local p; p="$(new_project pgitok)"
+  git -C "$p" init -q
+  printf 'node_modules/
+' > "$p/.gitignore"
+  run_install --project "$p" --claude
+  assert_eq "$status" "0" "exit status"
+  case "$out" in
+    *"is git-ignored"*) fail "unexpected git-ignored warning: $out" ;;
+  esac
+}
+
+test_project_claude_quiet_outside_a_git_repo() {
+  local p; p="$(new_project pnogit)"
+  run_install --project "$p" --claude
+  assert_eq "$status" "0" "exit status"
+  assert_file "$p/CLAUDE.md"
+  case "$out" in
+    *"is git-ignored"*) fail "unexpected git-ignored warning: $out" ;;
+  esac
+}
+
 test_project_claude_flag_order_does_not_matter() {
   local p; p="$(new_project p)"
   run_install --claude --project "$p"

@@ -166,9 +166,25 @@ That writes the same delimited block as `--user` into `<project>/CLAUDE.md`
 instead of `~/.claude/CLAUDE.md`. It's created if missing, appended if the file
 has no block yet, and only the block is rewritten on re-runs. Because
 Claude Code loads the project `CLAUDE.md` in every session, the rule then
-applies to every session in that repo for **everyone** who clones it, not just to
-`/opsx:apply` runs and not just on my machine. `--claude` is rejected with
-`--user`, which already writes `~/.claude/CLAUDE.md`.
+applies to every session in that repo, not just to `/opsx:apply` runs and not
+just on my machine. `--claude` is rejected with `--user`, which already writes
+`~/.claude/CLAUDE.md`.
+
+> **It warns when the file it wrote is git-ignored.** Upstream OpenSpec's
+> `.gitignore` lists `CLAUDE.md`, and this fork tracks that file — so in this
+> repo, and in any project that inherited the same rule, the written file is
+> real and active but `git add` skips it:
+>
+> ```text
+> !  /path/to/project/CLAUDE.md is git-ignored (by .gitignore:146:CLAUDE.md),
+>    so it will NOT be committed.
+> ```
+>
+> Keeping it local is a perfectly good choice — the rule still applies in that
+> working copy. The warning just means you find out now rather than when a
+> colleague's clone turns out not to have it. To make it travel with the repo,
+> add `!CLAUDE.md` to that project's `.gitignore`. Outside a git repo, or where
+> the path isn't ignored, the installer stays quiet.
 
 #### Secret protection
 
@@ -539,7 +555,7 @@ covers the whole surface on its own:
 |---|---|---|
 | `apply.instruction` | Any `/opsx:apply` run in a project carrying the schema — including a teammate's checkout | Everything else. A plain "commit this" never loads it |
 | `~/.claude/CLAUDE.md` | Every session on **my** machine, whatever the project or prompt | Anyone else's machine — it's personal config, not repo config |
-| `<project>/CLAUDE.md` | Every session in **that repo**, on any machine that clones it | Projects installed without `--claude` |
+| `<project>/CLAUDE.md` | Every session in **that repo** | Projects installed without `--claude`; other clones too, unless the file is committed — see the git-ignore warning [above](#option-b--per-project-required-for-shared-repos) |
 
 Since this is the one rule I least want missed, it's in more than one place.
 
