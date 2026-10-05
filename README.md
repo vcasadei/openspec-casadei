@@ -2,11 +2,11 @@
 
 <!-- BEGIN upstream-version: generated from tools/readme-header.md, do not edit -->
 [![CI](https://github.com/vcasadei/openspec-casadei/actions/workflows/installers.yml/badge.svg?branch=main)](https://github.com/vcasadei/openspec-casadei/actions/workflows/installers.yml)
-[![Synced to OpenSpec](https://img.shields.io/badge/synced_to_OpenSpec-v1.13.2-blue)](https://github.com/Fission-AI/OpenSpec/commit/79b6aa9c98f1e36795b2bc4ef2a8f770c6d3a777)
+[![Synced to OpenSpec](https://img.shields.io/badge/synced_to_OpenSpec-v1.14.0-blue)](https://github.com/Fission-AI/OpenSpec/commit/2500d6da971336167548b53731a35b2127df35ac)
 
 My personal fork of [OpenSpec](https://github.com/Fission-AI/OpenSpec), synced
-to **v1.13.2** (upstream commit
-[`79b6aa9`](https://github.com/Fission-AI/OpenSpec/commit/79b6aa9c98f1e36795b2bc4ef2a8f770c6d3a777)), set up
+to **v1.14.0** (upstream commit
+[`2500d6d`](https://github.com/Fission-AI/OpenSpec/commit/2500d6da971336167548b53731a35b2127df35ac)), set up
 the way I like to work.
 <!-- END upstream-version -->
 
